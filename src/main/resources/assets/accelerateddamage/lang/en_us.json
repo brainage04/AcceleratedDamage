@@ -1,0 +1,6 @@
+{
+  "gamerule.accelerateddamage.disable_i_frames": "Disable Invincibility Frames",
+  "gamerule.accelerateddamage.faster_effect_damage_ticking": "Faster Effect Damage Ticking",
+  "gamerule.accelerateddamage.disable_attack_cooldown": "Disable Attack Cooldown",
+  "gamerule.accelerateddamage.instant_shoot": "Instant Shooting"
+}

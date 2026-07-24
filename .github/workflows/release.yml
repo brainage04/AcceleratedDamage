@@ -47,6 +47,6 @@ jobs:
       artifact_file: ${{ needs.prepare.outputs.artifact_file }}
       release_body: ${{ needs.prepare.outputs.release_body }}
       project_id: ${{ vars.CURSEFORGE_PROJECT_ID }}
-      project_slug: fabricmoddingtemplate
+      project_slug: accelerated-damage
     secrets:
       curseforge_token: ${{ secrets.CURSEFORGE_TOKEN }}

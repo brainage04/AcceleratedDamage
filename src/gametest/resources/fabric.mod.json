@@ -3,14 +3,11 @@
 	"id": "${mod_id}-gametest",
 	"version": "${mod_version}",
 	"name": "${mod_name} Game Tests",
-	"icon": "assets/fabricmoddingtemplate/icon.png",
+	"icon": "assets/accelerateddamage/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		"fabric-client-gametest": [
-			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplateClientGameTest"
-		],
 		"fabric-gametest": [
-			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplateGameTest"
+			"io.github.brainage04.accelerateddamage.AcceleratedDamageGameTest"
 		]
 	}
 }

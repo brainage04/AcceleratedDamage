@@ -3,38 +3,30 @@
 	"id": "${mod_id}",
 	"version": "${mod_version}",
 	"name": "${mod_name}",
-	"description": "My Minecraft Fabric modding template.",
+	"description": "Server-side gamerules for accelerated combat and environmental damage.",
 	"authors": [
 		"brainage04"
 	],
 	"contact": {
-		"homepage": "https://github.com/brainage04/FabricModdingTemplate",
-		"sources": "https://github.com/brainage04/FabricModdingTemplate"
+		"homepage": "https://github.com/brainage04/AcceleratedDamage",
+		"sources": "https://github.com/brainage04/AcceleratedDamage"
 	},
 	"license": "MIT",
-	"icon": "assets/fabricmoddingtemplate/icon.png",
+	"icon": "assets/accelerateddamage/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		"client": [
-			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplateClient"
-		],
 		"main": [
-			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplate"
+			"io.github.brainage04.accelerateddamage.AcceleratedDamage"
 		]
 	},
 	"mixins": [
-		"fabricmoddingtemplate.mixins.json",
-		{
-			"config": "fabricmoddingtemplate.client.mixins.json",
-			"environment": "client"
-		}
+		"accelerateddamage.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=${loader_version}",
 		"minecraft": "~${minecraft_version}",
 		"java": ">=${java_version}",
-		"fabric-api": "*",
-		"fzzy_config": ">=0.7.6"
+		"fabric-api": "*"
 	},
-    "accessWidener": "fabricmoddingtemplate.accesswidener"
+	"accessWidener": "accelerateddamage.accesswidener"
 }
