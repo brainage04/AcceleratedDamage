@@ -1,11 +1,8 @@
 {
   "categories": [
-    "library"
+    "game-mechanics"
   ],
-  "additional_categories": [],
-  "dependency_overrides": {
-    "fzzy_config": {
-      "project_slug": "fzzy-config"
-    }
-  }
+  "additional_categories": [
+    "utility"
+  ]
 }
