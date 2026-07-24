@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "${mod_id}",
+	"version": "${mod_version}",
+	"name": "${mod_name}",
+	"description": "My Minecraft Fabric modding template.",
+	"authors": [
+		"brainage04"
+	],
+	"contact": {
+		"homepage": "https://github.com/brainage04/FabricModdingTemplate",
+		"sources": "https://github.com/brainage04/FabricModdingTemplate"
+	},
+	"license": "MIT",
+	"icon": "assets/fabricmoddingtemplate/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"client": [
+			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplateClient"
+		],
+		"main": [
+			"io.github.brainage04.fabricmoddingtemplate.FabricModdingTemplate"
+		]
+	},
+	"mixins": [
+		"fabricmoddingtemplate.mixins.json",
+		{
+			"config": "fabricmoddingtemplate.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=${java_version}",
+		"fabric-api": "*",
+		"fzzy_config": ">=0.7.6"
+	},
+    "accessWidener": "fabricmoddingtemplate.accesswidener"
+}
