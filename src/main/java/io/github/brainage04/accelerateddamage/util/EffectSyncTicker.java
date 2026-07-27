@@ -1,7 +1,7 @@
 package io.github.brainage04.accelerateddamage.util;
 
+import io.github.brainage04.accelerateddamage.platform.AcceleratedDamagePlatform;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,8 +11,8 @@ public final class EffectSyncTicker {
     private EffectSyncTicker() {
     }
 
-    public static void initialize() {
-        ServerTickEvents.END_SERVER_TICK.register(EffectSyncTicker::syncEffects);
+    public static void initialize(AcceleratedDamagePlatform platform) {
+        platform.registerEndServerTick(EffectSyncTicker::syncEffects);
     }
 
     private static void syncEffects(MinecraftServer server) {

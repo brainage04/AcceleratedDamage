@@ -1,0 +1,28 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="accelerateddamage"
+version="${version}"
+displayName="Accelerated Damage"
+description='''Server-side gamerules for accelerated combat and environmental damage.'''
+authors="brainage04"
+displayURL="https://github.com/brainage04/AcceleratedDamage"
+
+[[mixins]]
+config="accelerateddamage.mixins.json"
+
+[[dependencies.accelerateddamage]]
+modId="neoforge"
+type="required"
+versionRange="[${neoforge_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.accelerateddamage]]
+modId="minecraft"
+type="required"
+versionRange="[${minecraft_version},${minecraft_version}.1)"
+ordering="NONE"
+side="BOTH"
