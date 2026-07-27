@@ -1,0 +1,8 @@
+{
+  "required": true,
+  "package": "io.github.brainage04.accelerateddamage.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["entity.EntityMixin", "entity.LivingEntityMixin", "item.BowItemMixin", "item.CrossbowItemMixin", "item.TridentItemMixin", "effect.MobEffectInstanceMixin", "effect.PoisonMobEffectMixin", "effect.WitherMobEffectMixin"],
+  "injectors": {"defaultRequire": 1},
+  "overwrites": {"requireAnnotations": true}
+}

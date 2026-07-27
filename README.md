@@ -1,12 +1,11 @@
 # Accelerated Damage
 
-A server-side Fabric mod for Minecraft 26.2 that exposes configurable accelerated combat and damage mechanics as gamerules. Clients do not need to install the mod.
+A server-side Minecraft 26.2 mod for Fabric and NeoForge that exposes configurable accelerated combat and damage mechanics as gamerules. Clients do not need to install the mod.
 
 ## Requirements
 
 - Minecraft 26.2
-- Fabric Loader 0.19.3 or newer
-- Fabric API
+- Fabric Loader 0.19.3 or newer with Fabric API, or NeoForge 26.2.0.23-beta or newer
 - Java 25 or newer
 
 ## Gamerules
@@ -31,10 +30,16 @@ Use vanilla's gamerule command to query or update a rule:
 
 ```shell
 ./gradlew build
-./gradlew runProductionServerGameTest
+./gradlew runAllProductionGameTests
 ```
 
 The production GameTests exercise consecutive melee damage and the bow/trident instant-shoot behavior on a dedicated server.
+
+## Migrating from the Fabric-only release
+
+Install exactly one matching release JAR: `accelerateddamage-<version>.jar` for Fabric (with Fabric API), or `accelerateddamage-neoforge-<version>.jar` for NeoForge. Remove the old Accelerated Damage JAR before switching loaders; do not place both loader JARs in the same `mods` directory.
+
+The mod ID remains `accelerateddamage`, so existing gamerule names and world-level gamerule data remain the same. This is server-side on both loaders: install it on the server only, and vanilla clients can connect. Fabric requires Fabric API; the NeoForge JAR has no additional mod dependency. Root `./gradlew build` emits both loader artifacts under `build/libs`.
 
 ## License
 
