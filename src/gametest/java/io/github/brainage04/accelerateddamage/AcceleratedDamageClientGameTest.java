@@ -5,7 +5,7 @@ import io.github.brainage04.fabricmoddingconventions.ClientGameTestRecorder;
 import io.github.brainage04.fabricmoddingconventions.ClientGameTestServers;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
-import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
+
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -30,44 +30,41 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     public void runTest(ClientGameTestContext context) {
         Properties serverProperties = ClientGameTestServers.flatServerProperties();
 
-        try (TestDedicatedServerContext server = context.worldBuilder().createServer(serverProperties)) {
-            ClientGameTestServers.connectToDedicatedServer(context, server, "Accelerated Damage combat range GameTest");
-            try {
-                server.runOnServer(AcceleratedDamageClientGameTest::prepareRange);
-                ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
-                context.waitTicks(20);
-
-                ClientGameTestRecorder.startRecording(context);
-                ClientGameTestRecorder.showStep(
-                        context,
-                        "combat-range.ready",
-                        "Accelerated Damage combat range",
-                        "Two marked targets demonstrate no invincibility frames and instant bow charge"
-                );
-                context.waitTicks(30);
-
-                ClientGameTestRecorder.showStep(
-                        context,
-                        "combat-range.consecutive-hits",
-                        "Consecutive hits bypass invincibility frames",
-                        "The red target takes two immediate melee hits; its health is asserted on the server"
-                );
-                server.runOnServer(AcceleratedDamageClientGameTest::demonstrateConsecutiveDamage);
-                context.waitTicks(30);
-
-                ClientGameTestRecorder.showStep(
-                        context,
-                        "combat-range.instant-bow",
-                        "Instant bow charge",
-                        "The player holds a bow and the server verifies a one-tick full charge"
-                );
-                server.runOnServer(AcceleratedDamageClientGameTest::demonstrateInstantBow);
-                context.waitTicks(40);
-            } finally {
-                server.runOnServer(AcceleratedDamageClientGameTest::restoreRules);
-                ClientGameTestServers.disconnectFromDedicatedServer(context);
-            }
-        }
+        ClientGameTestServers.withDedicatedServer(context, serverProperties, "Accelerated Damage combat range GameTest", server -> { try {
+            server.runOnServer(AcceleratedDamageClientGameTest::prepareRange);
+            ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
+            context.waitTicks(20);
+        
+            ClientGameTestRecorder.startRecording(context);
+            ClientGameTestRecorder.showStep(
+                    context,
+                    "combat-range.ready",
+                    "Accelerated Damage combat range",
+                    "Two marked targets demonstrate no invincibility frames and instant bow charge"
+            );
+            context.waitTicks(30);
+        
+            ClientGameTestRecorder.showStep(
+                    context,
+                    "combat-range.consecutive-hits",
+                    "Consecutive hits bypass invincibility frames",
+                    "The red target takes two immediate melee hits; its health is asserted on the server"
+            );
+            server.runOnServer(AcceleratedDamageClientGameTest::demonstrateConsecutiveDamage);
+            context.waitTicks(30);
+        
+            ClientGameTestRecorder.showStep(
+                    context,
+                    "combat-range.instant-bow",
+                    "Instant bow charge",
+                    "The player holds a bow and the server verifies a one-tick full charge"
+            );
+            server.runOnServer(AcceleratedDamageClientGameTest::demonstrateInstantBow);
+            context.waitTicks(40);
+        } finally {
+            server.runOnServer(AcceleratedDamageClientGameTest::restoreRules);
+            ;
+        } });
     }
 
     private static void prepareRange(MinecraftServer server) {
