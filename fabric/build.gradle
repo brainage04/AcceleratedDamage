@@ -8,15 +8,9 @@ plugins {
 
 base { archivesName = rootProject.archives_base_name }
 
-sourceSets {
-    gametest {
-        java.srcDir rootProject.file('src/gametest/java')
-        resources.srcDir rootProject.file('src/gametest/resources')
-    }
-}
 
 loom {
-    accessWidenerPath = rootProject.file('src/main/resources/accelerateddamage.accesswidener')
+    accessWidenerPath = project(':common').file('src/main/resources/accelerateddamage.accesswidener')
     mods {
         main {
             sourceSet sourceSets.main
@@ -56,7 +50,7 @@ modPublishing {
     licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
     modrinth.projectConfig.set(rootProject.layout.projectDirectory.file('.modrinth/project.json'))
     modrinth.projectBody.set(rootProject.layout.projectDirectory.file('README.md'))
-    modrinth.iconFile.set(rootProject.layout.projectDirectory.file('src/main/resources/assets/accelerateddamage/icon.png'))
+    modrinth.iconFile.set(rootProject.layout.projectDirectory.file('common/src/main/resources/assets/accelerateddamage/icon.png'))
 }
 
 dependencies {

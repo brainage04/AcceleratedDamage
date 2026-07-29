@@ -3,19 +3,9 @@ plugins {
     id 'dev.architectury.loom'
 }
 
-sourceSets {
-    main {
-        java.srcDir rootProject.file('src/main/java')
-        resources.srcDir rootProject.file('src/main/resources')
-    }
-    test {
-        java.srcDir rootProject.file('src/test/java')
-        resources.srcDir rootProject.file('src/test/resources')
-    }
-}
 
 loom {
-    accessWidenerPath = rootProject.file('src/main/resources/accelerateddamage.accesswidener')
+    accessWidenerPath = project.file('src/main/resources/accelerateddamage.accesswidener')
 }
 
 dependencies {
