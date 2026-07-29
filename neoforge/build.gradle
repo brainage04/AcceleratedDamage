@@ -24,7 +24,6 @@ tasks.named('validateModPublication') {
 
 sourceSets {
     gametest {
-        java.srcDir project.file('src/gametest/java')
         compileClasspath += sourceSets.main.output + configurations.compileClasspath
         runtimeClasspath += output + compileClasspath + configurations.runtimeClasspath
     }
