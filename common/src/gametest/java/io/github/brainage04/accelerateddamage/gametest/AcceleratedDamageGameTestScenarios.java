@@ -155,9 +155,14 @@ public final class AcceleratedDamageGameTestScenarios {
             tickFreeze(acceleratedFreeze, 10);
             assertEquals(10.0F, acceleratedFreeze.getHealth(),
                     "Expected ten compressed freeze damage ticks across forty virtual ticks");
+
+            Zombie acceleratedThaw = createZombie(level);
+            acceleratedThaw.setTicksFrozen(acceleratedThaw.getTicksRequiredToFreeze() + 20);
+            acceleratedThaw.tickCount = 1;
+            acceleratedThaw.aiStep();
             assertEquals(
-                    acceleratedFreeze.getTicksRequiredToFreeze(),
-                    acceleratedFreeze.getTicksFrozen(),
+                    acceleratedThaw.getTicksRequiredToFreeze(),
+                    acceleratedThaw.getTicksFrozen(),
                     "Expected thawing to advance ten times faster without underflow"
             );
         } finally {
@@ -463,6 +468,13 @@ public final class AcceleratedDamageGameTestScenarios {
             projectile.setDeltaMovement(
                     targetCenter.subtract(projectile.position()).normalize().scale(3.0)
             );
+        }
+        for (int tick = 0; tick < 3 && target.getHealth() == target.getMaxHealth(); tick++) {
+            for (AbstractArrow projectile : projectiles) {
+                if (!projectile.isRemoved()) {
+                    projectile.tick();
+                }
+            }
         }
     }
 

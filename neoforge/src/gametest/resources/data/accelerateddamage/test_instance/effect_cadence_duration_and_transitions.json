@@ -1,5 +1,5 @@
 {
-  "environment": "minecraft:default",
+  "environment": "accelerateddamage:effect_cadence",
   "structure": "minecraft:empty",
   "max_ticks": 20,
   "type": "minecraft:function",

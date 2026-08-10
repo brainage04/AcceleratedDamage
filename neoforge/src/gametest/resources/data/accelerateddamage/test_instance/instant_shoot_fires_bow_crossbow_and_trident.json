@@ -1,5 +1,5 @@
 {
-  "environment": "minecraft:default",
+  "environment": "accelerateddamage:instant_shoot",
   "structure": "minecraft:empty",
   "max_ticks": 100,
   "type": "minecraft:function",

@@ -1,5 +1,5 @@
 {
-  "environment": "minecraft:default",
+  "environment": "accelerateddamage:attack_cooldown",
   "structure": "minecraft:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
