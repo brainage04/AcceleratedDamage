@@ -1,0 +1,7 @@
+{
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "max_ticks": 100,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:instant_shoot_fires_bow_crossbow_and_trident"
+}

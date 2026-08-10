@@ -14,9 +14,9 @@ All rules are disabled by default.
 
 | Gamerule | Effect |
 | --- | --- |
-| `accelerateddamage:disable_i_frames` | Lets consecutive melee attacks deal damage without vanilla invincibility frames. Environmental damage retains vanilla invincibility unless accelerated effect damage is also enabled. |
-| `accelerateddamage:faster_effect_damage_ticking` | Runs fire, freezing, poison, and wither damage ten times faster while shortening those effects at the same rate. |
-| `accelerateddamage:disable_attack_cooldown` | Raises connected players' base attack speed and applies the same change when players join. |
+| `accelerateddamage:disable_i_frames` | Disables the repeated-damage invincibility window for every damage source. |
+| `accelerateddamage:faster_effect_ticking` | Advances every status-effect duration and periodic application ten times faster, with the same single-timeline acceleration for fire and freezing. Accelerated damage ticks bypass their compressed invincibility window; unrelated damage keeps vanilla invincibility. |
+| `accelerateddamage:disable_attack_cooldown` | Makes server-authoritative attacks fully charged immediately, independently of server tick rate. |
 | `accelerateddamage:instant_shoot` | Fully charges bows and crossbows immediately and removes the trident's minimum throw time. |
 
 Use vanilla's gamerule command to query or update a rule:

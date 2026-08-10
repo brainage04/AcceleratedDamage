@@ -3,5 +3,5 @@
   "structure": "minecraft:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
-  "function": "accelerateddamage:instant_shoot_changes_bow_and_trident_charge"
+  "function": "accelerateddamage:fire_and_freeze_use_single_compressed_timeline"
 }

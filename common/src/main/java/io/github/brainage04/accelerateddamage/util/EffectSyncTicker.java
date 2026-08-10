@@ -17,7 +17,7 @@ public final class EffectSyncTicker {
 
     private static void syncEffects(MinecraftServer server) {
         if (server.getTickCount() % 10 != 0
-                || !server.getGameRules().get(ModGameRules.FASTER_EFFECT_DAMAGE_TICKING)) {
+                || !server.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING)) {
             return;
         }
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
