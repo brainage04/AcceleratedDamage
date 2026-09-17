@@ -1,0 +1,17 @@
+{
+  "project": "AcceleratedDamage",
+  "icon": "pixel2/accelerated-damage-down1-left7.png",
+  "generator": "pixel2/render.py (round3/pixel2/render.py)",
+  "derived_from": "round3/pixel2/manifest.json",
+  "note": "Extract of the round-3 pixel2 manifest for this icon only. round3/pixel2/manifest.json also covers other mods and is not reproduced here.",
+  "entries": [
+    {
+      "project": "AcceleratedDamage",
+      "label": "Real Speed status-effect icon DOUBLED (36x36) as the background; HUD hardcore half heart at 2x moved 1 px down and 7 px left. HUD relative sizes preserved exactly (effect icon 18x18, heart 9x9, both at 2x).",
+      "path": "pixel2/accelerated-damage-down1-left7.png",
+      "method": "Pillow deterministic native-pixel composition",
+      "source": "Official Java 1.21.4 client.jar: mob_effect/speed.png, gui/sprites/hud/heart/container_hardcore.png, gui/sprites/hud/heart/hardcore_half.png",
+      "notes": "Real Speed status-effect icon DOUBLED (36x36) as the background; HUD hardcore half heart at 2x moved 1 px down and 7 px left. HUD relative sizes preserved exactly (effect icon 18x18, heart 9x9, both at 2x)."
+    }
+  ]
+}
