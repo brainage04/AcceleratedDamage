@@ -1,0 +1,7 @@
+{
+  "environment": "accelerateddamage:mob_attacks",
+  "structure": "minecraft:empty",
+  "max_ticks": 20,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:mob_attacks_use_compressed_timeline"
+}

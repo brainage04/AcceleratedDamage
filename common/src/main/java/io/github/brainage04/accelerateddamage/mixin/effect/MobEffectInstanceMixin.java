@@ -1,11 +1,8 @@
 package io.github.brainage04.accelerateddamage.mixin.effect;
 
-import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
-import io.github.brainage04.accelerateddamage.util.DamageAccelerationContext;
 import io.github.brainage04.accelerateddamage.util.EffectTickCadence;
-import io.github.brainage04.accelerateddamage.util.ServerContext;
+import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import it.unimi.dsi.fastutil.ints.Int2IntFunction;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -18,13 +15,12 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(MobEffectInstance.class)
 public abstract class MobEffectInstanceMixin {
-    private static final int ACCELERATION = 10;
-
     @Shadow
     private int duration;
 
+    /** Bit {@code n} is set when the effect applies at virtual tick offset {@code n} of this server tick. */
     @Unique
-    private int acceleratedDamage$pendingApplications;
+    private int acceleratedDamage$pendingOffsets;
 
     @Unique
     private int acceleratedDamage$infiniteTick;
@@ -39,19 +35,19 @@ public abstract class MobEffectInstanceMixin {
                     target = "Lnet/minecraft/world/effect/MobEffect;shouldApplyEffectTickThisTick(II)Z"
             )
     )
-    private boolean acceleratedDamage$countEffectApplications(
+    private boolean acceleratedDamage$collectApplicationOffsets(
             MobEffect effect,
             int tick,
             int amplifier
     ) {
-        if (!acceleratedDamage$isEnabled()) {
-            acceleratedDamage$pendingApplications = 0;
+        acceleratedDamage$pendingOffsets = 0;
+        if (!VirtualTime.isEnabled()) {
             acceleratedDamage$wasAcceleratingInfinite = false;
             return effect.shouldApplyEffectTickThisTick(tick, amplifier);
         }
 
         int currentTick = tick;
-        int ticksAdvanced = Math.min(ACCELERATION, Math.max(duration, 0));
+        int ticksAdvanced = Math.min(VirtualTime.ACCELERATION, Math.max(duration, 0));
         boolean ascending = false;
         if (duration == MobEffectInstance.INFINITE_DURATION) {
             if (!acceleratedDamage$wasAcceleratingInfinite) {
@@ -59,21 +55,20 @@ public abstract class MobEffectInstanceMixin {
                 acceleratedDamage$wasAcceleratingInfinite = true;
             }
             currentTick = acceleratedDamage$infiniteTick;
-            acceleratedDamage$infiniteTick += ACCELERATION;
-            ticksAdvanced = ACCELERATION;
+            acceleratedDamage$infiniteTick += VirtualTime.ACCELERATION;
+            ticksAdvanced = VirtualTime.ACCELERATION;
             ascending = true;
         } else {
             acceleratedDamage$wasAcceleratingInfinite = false;
         }
 
-        acceleratedDamage$pendingApplications = 0;
         for (int offset = 0; offset < ticksAdvanced; offset++) {
             int scheduledTick = EffectTickCadence.scheduledTick(currentTick, offset, ascending);
             if (effect.shouldApplyEffectTickThisTick(scheduledTick, amplifier)) {
-                acceleratedDamage$pendingApplications++;
+                acceleratedDamage$pendingOffsets |= 1 << offset;
             }
         }
-        return acceleratedDamage$pendingApplications > 0;
+        return acceleratedDamage$pendingOffsets != 0;
     }
 
     @Redirect(
@@ -83,26 +78,28 @@ public abstract class MobEffectInstanceMixin {
                     target = "Lnet/minecraft/world/effect/MobEffect;applyEffectTick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/LivingEntity;I)Z"
             )
     )
-    private boolean acceleratedDamage$applyEffectRepeatedly(
+    private boolean acceleratedDamage$applyAtEachOffset(
             MobEffect effect,
             ServerLevel level,
             LivingEntity entity,
             int amplifier
     ) {
-        int applications = acceleratedDamage$pendingApplications;
-        acceleratedDamage$pendingApplications = 0;
-        if (applications == 0) {
+        int offsets = acceleratedDamage$pendingOffsets;
+        acceleratedDamage$pendingOffsets = 0;
+        if (offsets == 0) {
             return effect.applyEffectTick(level, entity, amplifier);
         }
-        boolean previousContext = DamageAccelerationContext.enter();
-        try {
-            for (int application = 0; application < applications; application++) {
+        while (offsets != 0) {
+            int offset = Integer.numberOfTrailingZeros(offsets);
+            offsets &= offsets - 1;
+            int previousOffset = VirtualTime.enter(offset);
+            try {
                 if (!effect.applyEffectTick(level, entity, amplifier)) {
                     return false;
                 }
+            } finally {
+                VirtualTime.exit(previousOffset);
             }
-        } finally {
-            DamageAccelerationContext.exit(previousContext);
         }
         return true;
     }
@@ -118,15 +115,9 @@ public abstract class MobEffectInstanceMixin {
             MobEffectInstance instance,
             Int2IntFunction vanillaMapper
     ) {
-        if (acceleratedDamage$isEnabled()) {
-            return instance.mapDuration(duration -> Math.max(0, duration - ACCELERATION));
+        if (VirtualTime.isEnabled()) {
+            return instance.mapDuration(duration -> Math.max(0, duration - VirtualTime.ACCELERATION));
         }
         return instance.mapDuration(vanillaMapper);
-    }
-
-    @Unique
-    private static boolean acceleratedDamage$isEnabled() {
-        MinecraftServer server = ServerContext.get();
-        return server != null && server.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
     }
 }

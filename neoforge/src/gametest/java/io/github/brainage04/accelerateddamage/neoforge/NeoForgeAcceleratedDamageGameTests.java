@@ -21,6 +21,8 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageGameTestScenarios::fireAndFreezeUseSingleCompressedTimeline);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("effect_cadence_duration_and_transitions"),
                 () -> AcceleratedDamageGameTestScenarios::effectCadenceDurationAndTransitions);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("mob_attacks_use_compressed_timeline"),
+                () -> AcceleratedDamageGameTestScenarios::mobAttacksUseCompressedTimeline);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("attack_cooldown_is_immediate_for_existing_and_joining_players"),
                 () -> AcceleratedDamageGameTestScenarios::attackCooldownIsImmediateForExistingAndJoiningPlayers);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("instant_shoot_fires_bow_crossbow_and_trident"),

@@ -1,8 +1,7 @@
 package io.github.brainage04.accelerateddamage.mixin.entity;
 
-import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import io.github.brainage04.accelerateddamage.util.EffectTickCadence;
-import net.minecraft.server.level.ServerLevel;
+import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.world.entity.Entity;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
@@ -12,8 +11,6 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(Entity.class)
 public abstract class EntityMixin {
-    private static final int ACCELERATION = 10;
-
     @Shadow
     private int remainingFireTicks;
 
@@ -30,9 +27,8 @@ public abstract class EntityMixin {
             )
     )
     private int acceleratedDamage$includeCrossedFireDamageTick(Entity entity) {
-        if (entity.level() instanceof ServerLevel level
-                && level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING)
-                && EffectTickCadence.crossesScheduledTick(remainingFireTicks, 20, ACCELERATION)) {
+        if (VirtualTime.isEnabled(entity.level())
+                && EffectTickCadence.crossesScheduledTick(remainingFireTicks, 20, VirtualTime.ACCELERATION)) {
             return remainingFireTicks - Math.floorMod(remainingFireTicks, 20);
         }
         return remainingFireTicks;
@@ -46,9 +42,8 @@ public abstract class EntityMixin {
             )
     )
     private void acceleratedDamage$decrementFireFaster(Entity entity, int vanillaValue) {
-        if (entity.level() instanceof ServerLevel level
-                && level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING)) {
-            setRemainingFireTicks(Math.max(0, remainingFireTicks - ACCELERATION));
+        if (VirtualTime.isEnabled(entity.level())) {
+            setRemainingFireTicks(Math.max(0, remainingFireTicks - VirtualTime.ACCELERATION));
             return;
         }
         setRemainingFireTicks(vanillaValue);

@@ -20,6 +20,11 @@ public final class AcceleratedDamageGameTest {
         AcceleratedDamageGameTestScenarios.effectCadenceDurationAndTransitions(context);
     }
 
+    @GameTest(environment = "accelerateddamage:mob_attacks")
+    public void mobAttacksUseCompressedTimeline(GameTestHelper context) {
+        AcceleratedDamageGameTestScenarios.mobAttacksUseCompressedTimeline(context);
+    }
+
     @GameTest(environment = "accelerateddamage:attack_cooldown")
     public void attackCooldownIsImmediateForExistingAndJoiningPlayers(GameTestHelper context) {
         AcceleratedDamageGameTestScenarios.attackCooldownIsImmediateForExistingAndJoiningPlayers(context);
