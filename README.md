@@ -41,6 +41,10 @@ Install exactly one matching release JAR: `accelerateddamage-<version>.jar` for 
 
 The mod ID remains `accelerateddamage`, so existing gamerule names and world-level gamerule data remain the same. This is server-side on both loaders: install it on the server only, and vanilla clients can connect. Fabric requires Fabric API; the NeoForge JAR has no additional mod dependency. Root `./gradlew build` emits both loader artifacts under `build/libs`.
 
+## Publishing
+
+Release automation is documented in [docs/RELEASE.md](docs/RELEASE.md). Optional Modrinth publishing is documented in [docs/MODRINTH.md](docs/MODRINTH.md).
+
 ## License
 
 Accelerated Damage is available under the MIT License.
