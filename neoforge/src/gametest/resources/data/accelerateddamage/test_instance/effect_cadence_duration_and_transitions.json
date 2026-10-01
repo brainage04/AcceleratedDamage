@@ -1,6 +1,6 @@
 {
   "environment": "accelerateddamage:effect_cadence",
-  "structure": "minecraft:empty",
+  "structure": "fabricmoddingconventions:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
   "function": "accelerateddamage:effect_cadence_duration_and_transitions"

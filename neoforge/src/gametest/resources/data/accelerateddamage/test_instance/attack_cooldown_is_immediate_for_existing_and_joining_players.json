@@ -1,6 +1,6 @@
 {
   "environment": "accelerateddamage:attack_cooldown",
-  "structure": "minecraft:empty",
+  "structure": "fabricmoddingconventions:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
   "function": "accelerateddamage:attack_cooldown_is_immediate_for_existing_and_joining_players"

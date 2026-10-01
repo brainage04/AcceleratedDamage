@@ -1,6 +1,6 @@
 {
   "environment": "accelerateddamage:fire_and_freeze",
-  "structure": "minecraft:empty",
+  "structure": "fabricmoddingconventions:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
   "function": "accelerateddamage:fire_and_freeze_use_single_compressed_timeline"
