@@ -30,7 +30,7 @@ Use vanilla's gamerule command to query or update a rule:
 
 ```shell
 ./gradlew build
-./gradlew runAllProductionGameTests
+./gradlew runAllGameTests
 ```
 
 The production GameTests exercise consecutive melee damage and the bow/trident instant-shoot behavior on a dedicated server.
