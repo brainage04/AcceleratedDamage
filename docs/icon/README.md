@@ -2,8 +2,10 @@
 
 ## What this is
 
-`docs/icon/icon.png` — the mod's icon: 36x36 PNG, 8-bit RGBA, non-interlaced, 569 bytes,
-sha256 `8e633c5db6034e3563cd73f2f45b71aab265e82570f26d4a273eca37d632a36b`.
+`docs/icon/icon.png` — the mod's icon: 512x512 PNG, 8-bit RGBA, non-interlaced, 2 893 bytes,
+sha256 `d05b9159a3bb46f5f3020a808a9e79e0bab2ee892ddecf592b87dec12ec9a1d6`.
+The mod ships byte-identical copies at `common/src/main/resources/assets/accelerateddamage/icon.png`
+and `fabric/src/gametest/resources/assets/accelerateddamage/icon.png`.
 
 ## How it was made
 
@@ -12,13 +14,18 @@ no antialiasing. `provenance/pixel2/render.py` (Pillow 12.3.0) composes it deter
 with integer/nearest-neighbour operations only:
 
 1. The real Speed status-effect sprite (18x18) is scaled **2x with NEAREST** as the
-   background, filling the 36x36 canvas.
+   background (36x36).
 2. The hardcore heart is assembled at its **native 9x9** size
-   (`container_hardcore` outline + `hardcore_half` fill, alpha-composited), scaled 2x to
-   18x18, and pasted at (2, 10) — i.e. moved **1 px down and 7 px left** of its centred
-   position.
-3. Native HUD proportions are preserved exactly: effect icon 18x18 and heart 9x9, both drawn
-   at 2x.
+   (`container_hardcore` outline + `hardcore_half` fill, alpha-composited) and scaled 2x to
+   18x18. The approved composition (variant `down1-left7`) pastes it at (2, 10) on the 36x36
+   canvas — **1 px down and 7 px left** of its centred position.
+3. Revision of 2026-10-02 (owner): 2 px are cropped off every side (36x36 → 32x32, which
+   puts the heart at (0, 8)), the heart is then moved **2 px right** to (2, 8), and the
+   32x32 result is enlarged **16x with NEAREST** to 512x512 (the icon rule: square, a power
+   of two, 512 or 1024 px). The crop only removes the Speed sprite's 1-texel left stub and
+   transparent margin.
+4. Native HUD proportions are preserved exactly: effect icon 18x18 and heart 9x9, both drawn
+   at 2x before the final 16x enlargement.
 
 Source textures (vanilla Java **1.21.4** client jar; no shader pack, no in-game capture, no
 camera):
@@ -42,7 +49,7 @@ unzip -p client-1.21.4.jar assets/minecraft/textures/gui/sprites/hud/heart/hardc
 | file | what it is |
 |---|---|
 | `provenance/pixel2/render.py` | the author script that generated this icon (and the other round-3 pixel icons) |
-| `provenance/pixel2/metadata.json` | this icon's entry extracted from `provenance/from-round3/pixel2/manifest.json`: label, method, source line, notes |
+| `provenance/pixel2/metadata.json` | the round-3 record of the approved 36x36 `down1-left7` composition, extracted from `provenance/from-round3/pixel2/manifest.json`: label, method, source line, notes (it predates the 2026-10-02 crop/move/512 revision) |
 | `provenance/pixel2/sources/*.png` | the three client-jar sprites this icon is built from (the other two siblings belong to SimpleTwitchChat/BrainageMinigames/TwitchPlaysMinecraft) |
 | `provenance/pixel/sources/*.png` | the remaining textures the shared script reads for its other sections, kept so the script runs unmodified |
 | `provenance/pixel/source-provenance.json` | jar member / sha256 / origin per source file, and which files this icon uses |
@@ -55,13 +62,14 @@ From `docs/icon/provenance` (Pillow 12.3.0):
 python3 pixel2/render.py
 ```
 
-This rewrites all six `accelerated-damage-*.png` variants (the other five offsets are not
-shipped) and the other round-3 pixel icons; compare
-`pixel2/accelerated-damage-down1-left7.png` with the sha256 above.
+This rewrites the six historical `accelerated-damage-down*-left*.png` candidates (not shipped),
+the shipped `pixel2/accelerated-damage.png`, and the other round-3 pixel icons; compare
+`pixel2/accelerated-damage.png` with the sha256 above.
 
 ## Notes
 
-- The chosen variant of the six generated offsets is **down 1 px, left 7 px**. The other five
+- The approved variant of the six generated offsets is **down 1 px, left 7 px**; the shipped
+  icon is that variant cropped by 2 px per side with the heart moved 2 px right. The other five
   (`down1-left3/5`, `down3-left3/5/7`) are deliberately not copied; the offsets differ only
   in the heart's placement, and the script parameterises them.
 - The heart outline and fill are both genuine vanilla HUD sprites, so the icon uses the real
