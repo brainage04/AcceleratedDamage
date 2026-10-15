@@ -35,12 +35,6 @@ Use vanilla's gamerule command to query or update a rule:
 
 The production GameTests exercise consecutive melee damage and the bow/trident instant-shoot behavior on a dedicated server.
 
-## Migrating from the Fabric-only release
-
-Install exactly one matching release JAR: `accelerateddamage-<version>.jar` for Fabric (with Fabric API), or `accelerateddamage-neoforge-<version>.jar` for NeoForge. Remove the old Accelerated Damage JAR before switching loaders; do not place both loader JARs in the same `mods` directory.
-
-The mod ID remains `accelerateddamage`, so existing gamerule names and world-level gamerule data remain the same. This is server-side on both loaders: install it on the server only, and vanilla clients can connect. Fabric requires Fabric API; the NeoForge JAR has no additional mod dependency. Root `./gradlew build` emits both loader artifacts under `build/libs`.
-
 ## Publishing
 
 Release automation is documented in [docs/RELEASE.md](docs/RELEASE.md). Optional Modrinth publishing is documented in [docs/MODRINTH.md](docs/MODRINTH.md).
