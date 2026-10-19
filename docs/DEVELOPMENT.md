@@ -8,7 +8,7 @@ In Thomas's Minecraft workspace, check `heavy status` and run Gradle through `he
 
 ```shell
 heavy status
-heavy --mem 6G --label accelerateddamage-tests -- ./gradlew --no-daemon -Pfabricmoddingconventions.devClientOptions=/nonexistent build runAllGameTests --continue
+heavy --mem 6G --label accelerateddamage-tests -- ./gradlew --no-daemon -Pfabricmoddingconventions.devClientOptions=/nonexistent --no-parallel --max-workers=2 build runAllGameTests --continue
 ```
 
 `runAllGameTests` includes Fabric and NeoForge server GameTests and the Fabric client GameTest. Shared server scenarios live in `common/src/gametest` and are registered by each loader. Client scenarios connect a vanilla client to a dedicated modded server and use keyboard input for melee and projectile attacks.
