@@ -2,6 +2,7 @@ package io.github.brainage04.accelerateddamage.neoforge;
 
 import io.github.brainage04.accelerateddamage.AcceleratedDamage;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -27,6 +28,10 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageGameTestScenarios::attackCooldownIsImmediateForExistingAndJoiningPlayers);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("instant_shoot_fires_bow_crossbow_and_trident"),
                 () -> AcceleratedDamageGameTestScenarios::instantShootFiresBowCrossbowAndTrident);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("air_drying_healing_and_mob_weapons"),
+                () -> AcceleratedDamageTimerScenarios::airDryingHealingAndMobWeapons);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("hunger_and_stinging_and_creeper_fuses"),
+                () -> AcceleratedDamageTimerScenarios::hungerAndStingingAndCreeperFuses);
     }
 
     private static Identifier id(String path) {

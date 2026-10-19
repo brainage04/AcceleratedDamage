@@ -1,0 +1,7 @@
+{
+  "environment": "accelerateddamage:fire_and_freeze",
+  "structure": "fabricmoddingconventions:empty",
+  "max_ticks": 20,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:air_drying_healing_and_mob_weapons"
+}

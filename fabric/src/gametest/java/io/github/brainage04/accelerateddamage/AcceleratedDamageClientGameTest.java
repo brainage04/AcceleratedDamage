@@ -17,11 +17,10 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.cow.Cow;
-import net.minecraft.world.item.BowItem;
-import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.entity.animal.allay.Allay;
+import net.minecraft.world.entity.animal.axolotl.Axolotl;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
 
@@ -61,9 +60,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 "Immediate attacks and no invincibility frames",
                                 "The player performs two real sword attacks; both must damage the target"
                         );
-                        server.runOnServer(AcceleratedDamageClientGameTest::performFirstRapidAttack);
-                        context.waitTicks(5);
-                        server.runOnServer(AcceleratedDamageClientGameTest::performSecondRapidAttack);
+                        server.runOnServer(AcceleratedDamageClientGameTest::prepareRapidAttacks);
+                        context.waitTicks(10);
+                        context.getInput().pressKey(options -> options.keyAttack);
+                        context.waitTicks(2);
+                        float firstHealth = server.computeOnServer(current -> findTarget(current.overworld(), "Rapid melee target").getHealth());
+                        if (firstHealth >= 10.0F) {
+                            throw new AssertionError("Expected a real client attack packet to damage the melee target.");
+                        }
+                        context.getInput().pressKey(options -> options.keyAttack);
+                        context.waitTicks(2);
+                        server.runOnServer(current -> {
+                            if (findTarget(current.overworld(), "Rapid melee target").getHealth() >= firstHealth) {
+                                throw new AssertionError("Expected consecutive client attack packets to bypass invincibility.");
+                            }
+                        });
                         context.waitTicks(25);
 
                         ClientGameTestRecorder.showStep(
@@ -80,13 +91,29 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
                         ClientGameTestRecorder.showStep(
                                 context,
+                                "showcase.healing-and-air",
+                                "Healing and drying share the accelerated timeline",
+                                "The injured allay heals while the axolotl runs out of air on dry land"
+                        );
+                        server.runOnServer(AcceleratedDamageClientGameTest::startHealingAndAirGallery);
+                        context.waitTicks(20);
+                        server.runOnServer(current -> {
+                            ServerLevel level = current.overworld();
+                            Allay allay = level.getEntitiesOfClass(Allay.class, new net.minecraft.world.phys.AABB(-10, 62, -10, 15, 70, 10)).getFirst();
+                            Axolotl axolotl = level.getEntitiesOfClass(Axolotl.class, allay.getBoundingBox().inflate(10)).getFirst();
+                            if (allay.getHealth() <= 5.0F || axolotl.getHealth() >= axolotl.getMaxHealth()) {
+                                throw new AssertionError("Expected visible accelerated healing and drying damage.");
+                            }
+                        });
+                        context.waitTicks(20);
+
+                        ClientGameTestRecorder.showStep(
+                                context,
                                 "showcase.instant-bow",
                                 "One-tick bow shot",
                                 "A real one-tick bow draw fires at and damages the marked target"
                         );
-                        server.runOnServer(AcceleratedDamageClientGameTest::fireInstantBow);
-                        context.waitTicks(15);
-                        server.runOnServer(current -> assertTargetDamaged(current, "Bow target"));
+                        tapWeapon(context, server, "Bow target", 1, false);
 
                         ClientGameTestRecorder.showStep(
                                 context,
@@ -94,9 +121,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 "One-tick crossbow shot",
                                 "A crossbow loads, fires, and damages its marked target after one tick"
                         );
-                        server.runOnServer(AcceleratedDamageClientGameTest::fireInstantCrossbow);
-                        context.waitTicks(15);
-                        server.runOnServer(current -> assertTargetDamaged(current, "Crossbow target"));
+                        tapWeapon(context, server, "Crossbow target", 2, true);
 
                         ClientGameTestRecorder.showStep(
                                 context,
@@ -104,9 +129,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 "One-tick trident throw",
                                 "A trident clears its vanilla minimum use time and damages its marked target"
                         );
-                        server.runOnServer(AcceleratedDamageClientGameTest::throwInstantTrident);
-                        context.waitTicks(20);
-                        server.runOnServer(current -> assertTargetDamaged(current, "Trident target"));
+                        tapWeapon(context, server, "Trident target", 3, false);
                         context.waitTicks(20);
                     } finally {
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
@@ -138,7 +161,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.teleportTo(level, -6.5, ARENA_Y, 0.5, Set.of(), -90.0F, 0.0F, false);
         player.getInventory().clearContent();
         player.getInventory().setSelectedSlot(0);
-        player.getInventory().setItem(0, new ItemStack(Items.IRON_SWORD));
+        player.getInventory().setItem(0, new ItemStack(Items.WOODEN_SWORD));
         player.getInventory().setItem(1, new ItemStack(Items.BOW));
         player.getInventory().setItem(2, new ItemStack(Items.CROSSBOW));
         player.getInventory().setItem(3, new ItemStack(Items.TRIDENT));
@@ -155,7 +178,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         createTarget(level, "Trident target", 2.0, ARENA_Y, 6.0);
     }
 
-    private static void performFirstRapidAttack(MinecraftServer server) {
+    private static void prepareRapidAttacks(MinecraftServer server) {
         ServerLevel level = server.overworld();
         ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
         Cow target = findTarget(level, "Rapid melee target");
@@ -169,28 +192,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.resetAttackStrengthTicker();
         if (Float.compare(player.getAttackStrengthScale(0.0F), 1.0F) != 0) {
             throw new AssertionError("Expected the first displayed attack to be fully charged.");
-        }
-        player.swing(InteractionHand.MAIN_HAND);
-        player.attack(target);
-        if (!(target.getHealth() < target.getMaxHealth())) {
-            throw new AssertionError("Expected the first displayed sword attack to deal damage.");
-        }
-    }
-
-    private static void performSecondRapidAttack(MinecraftServer server) {
-        ServerLevel level = server.overworld();
-        ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
-        Cow target = findTarget(level, "Rapid melee target");
-        float healthBefore = target.getHealth();
-
-        player.resetAttackStrengthTicker();
-        if (Float.compare(player.getAttackStrengthScale(0.0F), 1.0F) != 0) {
-            throw new AssertionError("Expected the consecutive displayed attack to be fully charged.");
-        }
-        player.swing(InteractionHand.MAIN_HAND);
-        player.attack(target);
-        if (!(target.getHealth() < healthBefore)) {
-            throw new AssertionError("Expected the consecutive real sword attack to bypass invincibility.");
         }
     }
 
@@ -212,6 +213,28 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         findTarget(level, "Wither target").addEffect(new MobEffectInstance(MobEffects.WITHER, 240, 1));
         player.addEffect(new MobEffectInstance(MobEffects.SPEED, 400));
         player.teleportTo(level, -6.5, ARENA_Y, 0.5, Set.of(), -90.0F, 0.0F, false);
+    }
+
+    private static void startHealingAndAirGallery(MinecraftServer server) {
+        ServerLevel level = server.overworld();
+        Allay allay = EntityTypes.ALLAY.create(level, EntitySpawnReason.COMMAND);
+        Axolotl axolotl = EntityTypes.AXOLOTL.create(level, EntitySpawnReason.COMMAND);
+        if (allay == null || axolotl == null) {
+            throw new AssertionError("Expected to create the healing and air gallery.");
+        }
+        allay.setPos(0.0, ARENA_Y, -4.0);
+        allay.setNoAi(true);
+        allay.setHealth(5.0F);
+        allay.setCustomName(Component.literal("Healing allay"));
+        allay.setCustomNameVisible(true);
+        axolotl.setPos(3.0, ARENA_Y, -4.0);
+        axolotl.setAirSupply(120);
+        axolotl.setCustomName(Component.literal("Drying axolotl"));
+        axolotl.setCustomNameVisible(true);
+        level.addFreshEntity(allay);
+        level.addFreshEntity(axolotl);
+        ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
+        player.teleportTo(level, -3.0, ARENA_Y, -2.5, Set.of(), -90.0F, 10.0F, false);
     }
 
     private static void assertEffectGallery(MinecraftServer server) {
@@ -256,44 +279,22 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    private static void fireInstantBow(MinecraftServer server) {
-        ServerLevel level = server.overworld();
-        ServerPlayer player = prepareShooter(server, "Bow target", 1);
-        ItemStack bow = player.getMainHandItem();
-        bow.use(level, player, InteractionHand.MAIN_HAND);
-        boolean fired = ((BowItem) Items.BOW).releaseUsing(
-                bow, level, player, bow.getUseDuration(player) - 1
-        );
-        if (!fired) {
-            throw new AssertionError("Expected the displayed one-tick bow shot to fire.");
+    private static void tapWeapon(
+            ClientGameTestContext context,
+            net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server,
+            String label,
+            int slot,
+            boolean crossbow
+    ) {
+        server.runOnServer(current -> prepareShooter(current, label, slot));
+        context.waitTicks(10);
+        context.getInput().holdKeyFor(options -> options.keyUse, 1);
+        context.waitTicks(10);
+        if (crossbow) {
+            context.getInput().pressKey(options -> options.keyUse);
         }
-    }
-
-    private static void fireInstantCrossbow(MinecraftServer server) {
-        ServerLevel level = server.overworld();
-        ServerPlayer player = prepareShooter(server, "Crossbow target", 2);
-        ItemStack crossbow = player.getMainHandItem();
-        crossbow.use(level, player, InteractionHand.MAIN_HAND);
-        int remainingUseDuration = crossbow.getUseDuration(player) - 1;
-        ((CrossbowItem) Items.CROSSBOW).onUseTick(level, player, crossbow, remainingUseDuration);
-        ((CrossbowItem) Items.CROSSBOW).releaseUsing(crossbow, level, player, remainingUseDuration);
-        if (!CrossbowItem.isCharged(crossbow)) {
-            throw new AssertionError("Expected the displayed crossbow to charge after one tick.");
-        }
-        crossbow.use(level, player, InteractionHand.MAIN_HAND);
-    }
-
-    private static void throwInstantTrident(MinecraftServer server) {
-        ServerLevel level = server.overworld();
-        ServerPlayer player = prepareShooter(server, "Trident target", 3);
-        ItemStack trident = player.getMainHandItem();
-        trident.use(level, player, InteractionHand.MAIN_HAND);
-        boolean thrown = ((TridentItem) Items.TRIDENT).releaseUsing(
-                trident, level, player, trident.getUseDuration(player) - 1
-        );
-        if (!thrown) {
-            throw new AssertionError("Expected the displayed trident to throw after one tick.");
-        }
+        context.waitTicks(15);
+        server.runOnServer(current -> assertTargetDamaged(current, label));
     }
 
     private static ServerPlayer prepareShooter(MinecraftServer server, String targetName, int selectedSlot) {

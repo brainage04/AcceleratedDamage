@@ -17,6 +17,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.InsideBlockEffectType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.animal.pig.Pig;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.projectile.EvokerFangs;
@@ -174,6 +175,10 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected ten compressed freeze damage ticks across forty virtual ticks");
 
             Zombie acceleratedThaw = createZombie(level);
+            // aiStep also runs the zombie's randomized sunlight ignition. Fire clears freezing.
+            acceleratedThaw.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
+            acceleratedThaw.setNoAi(true);
+            acceleratedThaw.setPos(context.absoluteVec(new Vec3(3.5, 6.0, 3.5)));
             acceleratedThaw.setTicksFrozen(acceleratedThaw.getTicksRequiredToFreeze() + 20);
             acceleratedThaw.tickCount = 1;
             acceleratedThaw.aiStep();

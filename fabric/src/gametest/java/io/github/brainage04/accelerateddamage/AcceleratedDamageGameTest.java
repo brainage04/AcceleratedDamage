@@ -1,6 +1,7 @@
 package io.github.brainage04.accelerateddamage;
 
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 
@@ -33,5 +34,15 @@ public final class AcceleratedDamageGameTest {
     @GameTest(environment = "accelerateddamage:instant_shoot", maxTicks = 100)
     public void instantShootFiresBowCrossbowAndTrident(GameTestHelper context) {
         AcceleratedDamageGameTestScenarios.instantShootFiresBowCrossbowAndTrident(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:fire_and_freeze")
+    public void airDryingHealingAndMobWeapons(GameTestHelper context) {
+        AcceleratedDamageTimerScenarios.airDryingHealingAndMobWeapons(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:fire_and_freeze")
+    public void hungerAndStingingAndCreeperFuses(GameTestHelper context) {
+        AcceleratedDamageTimerScenarios.hungerAndStingingAndCreeperFuses(context);
     }
 }
