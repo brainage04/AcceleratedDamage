@@ -1,6 +1,6 @@
 {
   "environment": "accelerateddamage:fire_and_freeze",
-  "structure": "fabricmoddingconventions:empty",
+  "structure": "minecraftmodconventions:empty",
   "max_ticks": 100,
   "type": "minecraft:function",
   "function": "accelerateddamage:beacon_and_conduit_pulses"

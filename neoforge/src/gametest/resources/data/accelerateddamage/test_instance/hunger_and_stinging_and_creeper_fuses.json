@@ -1,6 +1,6 @@
 {
   "environment": "accelerateddamage:fire_and_freeze",
-  "structure": "fabricmoddingconventions:empty",
+  "structure": "minecraftmodconventions:empty",
   "max_ticks": 20,
   "type": "minecraft:function",
   "function": "accelerateddamage:hunger_and_stinging_and_creeper_fuses"
