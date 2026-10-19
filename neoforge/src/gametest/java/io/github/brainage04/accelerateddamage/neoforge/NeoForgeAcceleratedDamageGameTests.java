@@ -32,6 +32,12 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageTimerScenarios::airDryingHealingAndMobWeapons);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("hunger_and_stinging_and_creeper_fuses"),
                 () -> AcceleratedDamageTimerScenarios::hungerAndStingingAndCreeperFuses);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("lingering_clouds_expire_on_the_selected_timeline"),
+                () -> AcceleratedDamageTimerScenarios::lingeringCloudsExpireOnTheSelectedTimeline);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("healing_melee_and_ram_cooldowns"),
+                () -> AcceleratedDamageTimerScenarios::healingMeleeAndRamCooldowns);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("beacon_and_conduit_pulses"),
+                () -> AcceleratedDamageTimerScenarios::beaconAndConduitPulses);
     }
 
     private static Identifier id(String path) {

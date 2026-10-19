@@ -45,4 +45,19 @@ public final class AcceleratedDamageGameTest {
     public void hungerAndStingingAndCreeperFuses(GameTestHelper context) {
         AcceleratedDamageTimerScenarios.hungerAndStingingAndCreeperFuses(context);
     }
+
+    @GameTest(environment = "accelerateddamage:fire_and_freeze")
+    public void lingeringCloudsExpireOnTheSelectedTimeline(GameTestHelper context) {
+        AcceleratedDamageTimerScenarios.lingeringCloudsExpireOnTheSelectedTimeline(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:fire_and_freeze")
+    public void healingMeleeAndRamCooldowns(GameTestHelper context) {
+        AcceleratedDamageTimerScenarios.healingMeleeAndRamCooldowns(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:fire_and_freeze", maxTicks = 100)
+    public void beaconAndConduitPulses(GameTestHelper context) {
+        AcceleratedDamageTimerScenarios.beaconAndConduitPulses(context);
+    }
 }

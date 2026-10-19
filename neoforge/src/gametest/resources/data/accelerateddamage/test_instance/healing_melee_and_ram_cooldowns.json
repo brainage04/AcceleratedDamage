@@ -1,0 +1,7 @@
+{
+  "environment": "accelerateddamage:fire_and_freeze",
+  "structure": "fabricmoddingconventions:empty",
+  "max_ticks": 20,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:healing_melee_and_ram_cooldowns"
+}
