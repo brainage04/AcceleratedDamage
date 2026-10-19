@@ -133,6 +133,8 @@ public final class AcceleratedDamageTimerScenarios {
                 cloud.setDuration(30);
                 try {
                     for (int tick = 0; tick < 3; tick++) {
+                        // ServerLevel normally advances entity age before calling tick().
+                        cloud.tickCount++;
                         cloud.tick();
                     }
                     context.assertTrue(cloud.isRemoved() == enabled,
