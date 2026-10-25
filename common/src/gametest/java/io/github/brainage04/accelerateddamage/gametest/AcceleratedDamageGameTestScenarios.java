@@ -48,30 +48,30 @@ public final class AcceleratedDamageGameTestScenarios {
         try {
             setRules(rules, server, false, false, false, false);
 
-            Zombie attacker = createZombie(level);
-            Zombie victim = createZombie(level);
+            Zombie attacker = createZombie(context);
+            Zombie victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().mobAttack(attacker), 1.0F),
                     "Expected the first vanilla melee hit to apply");
             assertFalse(victim.hurtServer(level, level.damageSources().mobAttack(attacker), 1.0F),
                     "Expected vanilla invincibility to reject the second melee hit");
 
             rules.set(ModGameRules.DISABLE_IFRAMES, true, server);
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().mobAttack(attacker), 1.0F),
                     "Expected the first melee hit to apply with invincibility disabled");
             assertTrue(victim.hurtServer(level, level.damageSources().mobAttack(attacker), 1.0F),
                     "Expected the second melee hit to bypass invincibility");
             assertTrue(victim.getHealth() < 19.0F, "Expected two accepted melee hits");
 
-            Zombie shooter = createZombie(level);
+            Zombie shooter = createZombie(context);
             Arrow arrow = new Arrow(level, shooter, new ItemStack(Items.ARROW), new ItemStack(Items.BOW));
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().arrow(arrow, shooter), 1.0F),
                     "Expected the first projectile hit to apply");
             assertTrue(victim.hurtServer(level, level.damageSources().arrow(arrow, shooter), 1.0F),
                     "Expected projectile damage to bypass invincibility without source filtering");
 
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().lava(), 1.0F),
                     "Expected the first environmental hit to apply");
             assertTrue(victim.hurtServer(level, level.damageSources().lava(), 1.0F),
@@ -79,7 +79,7 @@ public final class AcceleratedDamageGameTestScenarios {
 
             rules.set(ModGameRules.DISABLE_IFRAMES, false, server);
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, server);
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
                     "Expected the first contact hit to apply");
             assertFalse(victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
@@ -88,14 +88,14 @@ public final class AcceleratedDamageGameTestScenarios {
             assertTrue(victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
                     "Expected the ten-tick invincibility window to end after one accelerated server tick");
 
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
                     "Expected the first fire hit to apply");
             assertFalse(victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
                     "Expected fire damage to respect the compressed invincibility window");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, server);
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
                     "Expected the first vanilla contact hit to apply");
             victim.baseTick();
@@ -103,7 +103,7 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected vanilla invincibility to outlast one server tick");
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, server);
 
-            victim = createZombie(level);
+            victim = createZombie(context);
             victim.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 100));
             victim.damageCooldownTime = 8;
             victim.hurtDuration = 5;
@@ -131,7 +131,7 @@ public final class AcceleratedDamageGameTestScenarios {
         try {
             setRules(rules, server, true, true, false, false);
 
-            Zombie evenFire = createZombie(level);
+            Zombie evenFire = createZombie(context);
             evenFire.setHealth(20.0F);
             evenFire.setRemainingFireTicks(100);
             tickBase(evenFire, 4);
@@ -140,7 +140,7 @@ public final class AcceleratedDamageGameTestScenarios {
             assertEquals(18.0F, evenFire.getHealth(),
                     "Expected the compressed 100..61 window to cross two fire damage ticks");
 
-            Zombie oddFire = createZombie(level);
+            Zombie oddFire = createZombie(context);
             oddFire.setHealth(20.0F);
             oddFire.setRemainingFireTicks(95);
             tickBase(oddFire, 4);
@@ -150,7 +150,7 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected the compressed 95..56 window to cross the 80 and 60 damage ticks");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, server);
-            Zombie vanillaFire = createZombie(level);
+            Zombie vanillaFire = createZombie(context);
             vanillaFire.setHealth(20.0F);
             vanillaFire.setRemainingFireTicks(100);
             tickBase(vanillaFire, 4);
@@ -159,7 +159,7 @@ public final class AcceleratedDamageGameTestScenarios {
             assertEquals(19.0F, vanillaFire.getHealth(),
                     "Expected one vanilla fire damage tick");
 
-            Zombie vanillaFreeze = createZombie(level);
+            Zombie vanillaFreeze = createZombie(context);
             vanillaFreeze.setHealth(20.0F);
             vanillaFreeze.setTicksFrozen(vanillaFreeze.getTicksRequiredToFreeze() + 200);
             tickFreeze(vanillaFreeze, 10);
@@ -167,14 +167,14 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected one vanilla freeze damage tick across forty ticks");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, server);
-            Zombie acceleratedFreeze = createZombie(level);
+            Zombie acceleratedFreeze = createZombie(context);
             acceleratedFreeze.setHealth(20.0F);
             acceleratedFreeze.setTicksFrozen(acceleratedFreeze.getTicksRequiredToFreeze() + 200);
             tickFreeze(acceleratedFreeze, 10);
             assertEquals(10.0F, acceleratedFreeze.getHealth(),
                     "Expected ten compressed freeze damage ticks across forty virtual ticks");
 
-            Zombie acceleratedThaw = createZombie(level);
+            Zombie acceleratedThaw = createZombie(context);
             // aiStep also runs the zombie's randomized sunlight ignition. Fire clears freezing.
             acceleratedThaw.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
             acceleratedThaw.setNoAi(true);
@@ -188,7 +188,7 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected thawing to advance ten times faster without underflow"
             );
 
-            Zombie acceleratedBuildUp = createZombie(level);
+            Zombie acceleratedBuildUp = createZombie(context);
             acceleratedBuildUp.setTicksFrozen(acceleratedBuildUp.getTicksRequiredToFreeze() - 15);
             InsideBlockEffectType.FREEZE.effect().accept(acceleratedBuildUp);
             assertEquals(acceleratedBuildUp.getTicksRequiredToFreeze() - 5, acceleratedBuildUp.getTicksFrozen(),
@@ -198,7 +198,7 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected accelerated freeze build-up to stop at the fully frozen threshold");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, server);
-            Zombie vanillaBuildUp = createZombie(level);
+            Zombie vanillaBuildUp = createZombie(context);
             InsideBlockEffectType.FREEZE.effect().accept(vanillaBuildUp);
             assertEquals(1, vanillaBuildUp.getTicksFrozen(), "Expected vanilla powder snow build-up");
         } finally {
@@ -215,7 +215,7 @@ public final class AcceleratedDamageGameTestScenarios {
 
         try {
             setRules(rules, server, false, true, false, false);
-            Zombie entity = createZombie(level);
+            Zombie entity = createZombie(context);
 
             MobEffectInstance speed = new MobEffectInstance(MobEffects.SPEED, 15);
             assertTrue(speed.tickServer(level, entity, () -> { }),
@@ -246,14 +246,14 @@ public final class AcceleratedDamageGameTestScenarios {
             assertEquals(47, regeneration.getDuration(),
                     "Expected non-multiple durations to retain their phase");
 
-            entity = createZombie(level);
+            entity = createZombie(context);
             entity.setHealth(20.0F);
             MobEffectInstance poison = new MobEffectInstance(MobEffects.POISON, 12, 2);
             poison.tickServer(level, entity, () -> { });
             assertEquals(19.0F, entity.getHealth(),
                     "Expected a poison tick six virtual ticks after the last hit to stay inside the invincibility window");
 
-            entity = createZombie(level);
+            entity = createZombie(context);
             entity.setHealth(20.0F);
             MobEffectInstance wither = new MobEffectInstance(MobEffects.WITHER, 10, 3);
             wither.tickServer(level, entity, () -> { });
@@ -261,9 +261,9 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected a wither tick five virtual ticks after the last hit to stay inside the invincibility window");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, server);
-            float vanillaPoisonDamage = poisonDamageOverServerTicks(level, 120);
+            float vanillaPoisonDamage = poisonDamageOverServerTicks(context, 120);
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, server);
-            assertEquals(vanillaPoisonDamage, poisonDamageOverServerTicks(level, 12),
+            assertEquals(vanillaPoisonDamage, poisonDamageOverServerTicks(context, 12),
                     "Expected high-amplifier poison to deal the vanilla damage of 120 ticks in 12 accelerated ticks");
 
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, server);
@@ -273,7 +273,7 @@ public final class AcceleratedDamageGameTestScenarios {
             assertEquals(vanillaCloudDamage, cloudDamageOverServerTicks(context, 4),
                     "Expected a harming cloud to deal the vanilla damage of 40 ticks in 4 accelerated ticks");
 
-            entity = createZombie(level);
+            entity = createZombie(context);
             entity.setHealth(1.5F);
             poison = new MobEffectInstance(MobEffects.POISON, 12, 2);
             poison.tickServer(level, entity, () -> { });
@@ -281,13 +281,13 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected poison to retain its nonlethal final-health behavior");
             assertTrue(entity.isAlive(), "Expected poison not to kill its target");
 
-            entity = createZombie(level);
+            entity = createZombie(context);
             entity.setHealth(1.0F);
             wither = new MobEffectInstance(MobEffects.WITHER, 10, 3);
             wither.tickServer(level, entity, () -> { });
             assertFalse(entity.isAlive(), "Expected wither to retain lethal final-health behavior");
 
-            entity = createZombie(level);
+            entity = createZombie(context);
             entity.setHealth(10.0F);
             MobEffectInstance infinite = new MobEffectInstance(
                     MobEffects.REGENERATION, MobEffectInstance.INFINITE_DURATION
@@ -502,11 +502,15 @@ public final class AcceleratedDamageGameTestScenarios {
         }
     }
 
-    private static Zombie createZombie(ServerLevel level) {
-        Zombie zombie = EntityTypes.ZOMBIE.create(level, EntitySpawnReason.COMMAND);
+    /// The zombie is never added to the level, but block contact still applies, so it stands in the test's empty
+    /// structure. The GameTest world can have terrain at the origin: on 26.3 a zombie left at 0,0,0 stood in
+    /// sandstone and took suffocation damage.
+    private static Zombie createZombie(GameTestHelper context) {
+        Zombie zombie = EntityTypes.ZOMBIE.create(context.getLevel(), EntitySpawnReason.COMMAND);
         if (zombie == null) {
             throw new AssertionError("Expected to create a zombie");
         }
+        zombie.setPos(context.absoluteVec(new Vec3(3.5, 3.0, 3.5)));
         return zombie;
     }
 
@@ -554,8 +558,9 @@ public final class AcceleratedDamageGameTestScenarios {
         }
     }
 
-    private static float poisonDamageOverServerTicks(ServerLevel level, int serverTicks) {
-        Zombie entity = createZombie(level);
+    private static float poisonDamageOverServerTicks(GameTestHelper context, int serverTicks) {
+        ServerLevel level = context.getLevel();
+        Zombie entity = createZombie(context);
         entity.setHealth(20.0F);
         MobEffectInstance poison = new MobEffectInstance(MobEffects.POISON, 120, 2);
         for (int tick = 0; tick < serverTicks; tick++) {
