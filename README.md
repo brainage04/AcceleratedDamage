@@ -1,6 +1,6 @@
 # Accelerated Damage
 
-Accelerated Damage is a server-side Minecraft 26.2 mod for Fabric and NeoForge that exposes configurable accelerated combat and damage mechanics as gamerules. Clients do not need to install the mod.
+Accelerated Damage is a server-side Minecraft 26.3 mod for Fabric and NeoForge that exposes configurable accelerated combat and damage mechanics as gamerules. Clients do not need to install the mod.
 
 All rules are disabled by default.
 
@@ -28,8 +28,8 @@ Fully charges bows and crossbows immediately and removes the trident's minimum t
 
 ## Getting started
 
-- Minecraft 26.2
-- Fabric Loader 0.19.3 or newer with Fabric API, or NeoForge 26.2.0.88 or newer
+- Minecraft 26.3
+- Fabric Loader 0.19.5 or newer with Fabric API, or NeoForge 26.3.0.99 or newer
 - Java 25 or newer
 - Install on the server.
 

@@ -105,12 +105,12 @@ public final class AcceleratedDamageGameTestScenarios {
 
             victim = createZombie(level);
             victim.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 100));
-            victim.invulnerableTime = 8;
+            victim.damageCooldownTime = 8;
             victim.hurtDuration = 5;
             victim.hurtTime = 5;
             assertFalse(victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
                     "Expected fire resistance to reject fire damage");
-            assertEquals(8, victim.invulnerableTime,
+            assertEquals(8, victim.damageCooldownTime,
                     "Expected a rejected hit not to mutate invincibility time");
             assertEquals(5, victim.hurtDuration,
                     "Expected a rejected hit not to mutate hurt duration");

@@ -16,12 +16,12 @@ public abstract class ServerPlayerMixin {
             method = "tick",
             at = @At(
                     value = "FIELD",
-                    target = "Lnet/minecraft/server/level/ServerPlayer;invulnerableTime:I",
+                    target = "Lnet/minecraft/server/level/ServerPlayer;damageCooldownTime:I",
                     opcode = Opcodes.PUTFIELD
             )
     )
     private void acceleratedDamage$decayInvulnerabilityFaster(ServerPlayer self, int vanillaValue) {
-        self.invulnerableTime = VirtualTime.isEnabled(self.level())
+        self.damageCooldownTime = VirtualTime.isEnabled(self.level())
                 ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
                 : vanillaValue;
     }

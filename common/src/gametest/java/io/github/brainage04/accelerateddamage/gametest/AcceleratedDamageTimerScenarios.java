@@ -173,7 +173,7 @@ public final class AcceleratedDamageTimerScenarios {
                     context.assertTrue(firstHealth < victim.getMaxHealth(),
                             "The melee fixture must land its initial attack");
                     for (int tick = 0; tick < 2; tick++) {
-                        victim.invulnerableTime = 0;
+                        victim.damageCooldownTime = 0;
                         goal.tick();
                     }
                     context.assertTrue((victim.getHealth() < firstHealth) == enabled,
