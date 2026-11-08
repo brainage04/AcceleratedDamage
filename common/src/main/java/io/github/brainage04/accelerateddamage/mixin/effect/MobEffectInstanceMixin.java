@@ -18,7 +18,6 @@ public abstract class MobEffectInstanceMixin {
     @Shadow
     private int duration;
 
-    /** Bit {@code n} is set when the effect applies at virtual tick offset {@code n} of this server tick. */
     @Unique
     private int acceleratedDamage$pendingOffsets;
 

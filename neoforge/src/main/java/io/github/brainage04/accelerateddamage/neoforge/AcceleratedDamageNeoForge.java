@@ -28,7 +28,6 @@ public final class AcceleratedDamageNeoForge implements AcceleratedDamagePlatfor
     private final Map<Identifier, GameRule<Boolean>> gameRules = new LinkedHashMap<>();
 
     public AcceleratedDamageNeoForge(IEventBus modBus) {
-        // Game rules are created now and registered when NeoForge opens the game rule registry.
         AcceleratedDamage.initialize(this);
         modBus.addListener((RegisterEvent event) -> event.register(Registries.GAME_RULE, helper -> gameRules.forEach(helper::register)));
     }

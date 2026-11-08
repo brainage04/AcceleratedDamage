@@ -10,7 +10,6 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/** Snow golem, witch, llama spit, drowned trident and the wither's main head. */
 @Mixin(RangedAttackGoal.class)
 public abstract class RangedAttackGoalMixin {
     @Shadow

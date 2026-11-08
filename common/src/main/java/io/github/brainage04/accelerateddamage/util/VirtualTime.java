@@ -32,7 +32,6 @@ public final class VirtualTime {
         return server != null && server.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
     }
 
-    /** Enters the virtual tick {@code offset}; returns the previous offset for {@link #exit}. */
     public static int enter(int offset) {
         int[] current = OFFSET.get();
         int previous = current[0];
@@ -44,7 +43,6 @@ public final class VirtualTime {
         OFFSET.get()[0] = previousOffset;
     }
 
-    /** Virtual ticks that still elapse in the current server tick after the running virtual tick. */
     public static int remainingInTick() {
         return LAST_OFFSET - OFFSET.get()[0];
     }
