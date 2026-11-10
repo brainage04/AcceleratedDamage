@@ -13,7 +13,12 @@ public abstract class PhantomAttackStrategyGoalMixin {
     @Shadow
     private int nextSweepTick;
 
-    /** Time spent circling before the next swoop, {@code nextSweepTick--} (160 to 239 ticks). */
+    /**
+     * Time spent circling before the next swoop: {@code Phantom$PhantomAttackStrategyGoal#tick}
+     * sets it to 80, 90, 100 or 110 ticks ({@code Goal#adjustedTickDelay} halves
+     * {@code (8 + nextInt(4)) * 20} because this goal runs every other tick), so a swoop comes
+     * after 160, 180, 200 or 220 ticks.
+     */
     @Redirect(
             method = "tick",
             at = @At(
