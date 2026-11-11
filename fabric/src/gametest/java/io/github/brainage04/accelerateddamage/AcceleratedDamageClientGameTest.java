@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
@@ -24,9 +25,13 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.FireworkExplosion;
+import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -46,6 +51,11 @@ import java.util.UUID;
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
     private static final int ARENA_Y = 64;
     private static final double MELEE_DISTANCE = 2.6D;
+    private static final double RANGE_X = -6.5D;
+    private static final String DROWNING_STEP = "showcase.drowning";
+    private static final String DROWNING_TITLE = "Drowning in two seconds";
+    private static final String DROWNING_OFF_STEP = "showcase.drowning-off";
+    private static final String DROWNING_OFF_TITLE = "The same two seconds, rule off";
 
     @Override
     public void runTest(ClientGameTestContext context) {
@@ -70,7 +80,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.ready",
                                 "Accelerated Damage",
-                                "Every gamerule against player targets, with their health after each hit"
+                                "Every rule against player targets"
                         );
                         context.waitTicks(20);
 
@@ -86,7 +96,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.done",
                                 "Accelerated Damage",
-                                "Rules off: the same hits land once per cooldown window"
+                                "Rules off land once per window"
                         );
                         context.waitTicks(20);
                         ClientGameTestRecorder.stopRecording(context);
@@ -147,7 +157,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context,
                 "showcase.melee",
                 "Rapid melee: every hit lands",
-                "Five sword hits inside one cooldown window, and every one knocks the target back"
+                "Five hits, health printed after each"
         );
         int targetId = server.computeOnServer(current -> {
             ServerLevel level = current.overworld();
@@ -160,14 +170,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return spawnTarget(current, "MeleeDummy", new Vec3(0.5, ARENA_Y, 4.5));
         });
         context.waitTicks(4);
-        strikeRepeatedly(context, server, playerId, targetId, 5, true, true);
+        strikeRepeatedly(context, server, playerId, targetId, 5, true, true,
+                "showcase.melee", "Rapid melee: every hit lands");
         server.runOnServer(current -> removeTarget(current, targetId));
 
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.melee-off",
-                "The same hits with the rule off",
-                "Vanilla rejects every repeat hit inside the ten-tick part of the cooldown"
+                "The same hits, rule off",
+                "Vanilla rejects every repeat hit"
         );
         int vanillaTargetId = server.computeOnServer(current -> {
             GameRules rules = current.overworld().getGameRules();
@@ -178,7 +189,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return spawnTarget(current, "MeleeDummyOff", new Vec3(0.5, ARENA_Y, 4.5));
         });
         context.waitTicks(4);
-        strikeRepeatedly(context, server, playerId, vanillaTargetId, 2, false, false);
+        strikeRepeatedly(context, server, playerId, vanillaTargetId, 2, false, false,
+                "showcase.melee-off", "The same hits, rule off");
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
 
@@ -191,7 +203,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int targetId,
             int hits,
             boolean accelerated,
-            boolean chase
+            boolean chase,
+            String stepId,
+            String stepTitle
     ) {
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         for (int hit = 1; hit <= hits; hit++) {
@@ -202,26 +216,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 ClientGameTestPlayerActions.walkTo(context, position, MELEE_DISTANCE);
             }
             ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            long actionTimeBefore = server.computeOnServer(current -> player(current, playerId).getLastActionTime());
             ClientGameTestPlayerActions.attackEntity(context, targetId);
-            String aimAtPress = context.computeOnClient(client -> String.valueOf(client.hitResult));
             context.waitTicks(3);
-            long actionTimeAfter = server.computeOnServer(current -> player(current, playerId).getLastActionTime());
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
+            ClientGameTestRecorder.showStep(context, stepId, stepTitle, "hit " + hit + ", health " + health);
             ClientGameTestRecorder.log(context, "hit " + hit + "  target health " + health);
             if (accelerated && health >= previous) {
-                String clientState = context.computeOnClient(client -> "hitResult=" + client.hitResult
-                        + " handsBusy=" + client.player.isHandsBusy()
-                        + " usingItem=" + client.player.isUsingItem()
-                        + " attackScale=" + client.player.getAttackStrengthScale(0.0F)
-                        + " held=" + client.player.getMainHandItem()
-                        + " xRot=" + client.player.getXRot() + " yRot=" + client.player.getYRot())
-                        + " | aimAtPress=" + aimAtPress
-                        + " actionTime " + actionTimeBefore + " -> " + actionTimeAfter;
                 throw new AssertionError(
                         "Expected hit " + hit + " to damage the target; health stayed at " + health + ": "
                                 + server.computeOnServer(current -> describeTarget(current, targetId, playerId))
-                                + " | " + clientState
                 );
             }
             if (!accelerated && hit > 1 && health != previous) {
@@ -241,7 +244,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context,
                 "showcase.drowning",
                 "Drowning in two seconds",
-                "The air bar empties ten times faster and drowning damage starts"
+                "Air empties ten times faster"
         );
         server.runOnServer(current -> {
             GameRules rules = current.overworld().getGameRules();
@@ -252,13 +255,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             player.setHealth(player.getMaxHealth());
         });
         context.waitTicks(4);
-        reportAir(context, server, playerId, "start");
+        reportAir(context, server, playerId, DROWNING_STEP, DROWNING_TITLE, "start");
         context.waitTicks(10);
-        reportAir(context, server, playerId, "10 ticks");
+        reportAir(context, server, playerId, DROWNING_STEP, DROWNING_TITLE, "10 ticks");
         context.waitTicks(10);
-        reportAir(context, server, playerId, "20 ticks");
+        reportAir(context, server, playerId, DROWNING_STEP, DROWNING_TITLE, "20 ticks");
         context.waitTicks(20);
-        int[] drowned = reportAir(context, server, playerId, "40 ticks");
+        int[] drowned = reportAir(context, server, playerId, DROWNING_STEP, DROWNING_TITLE, "40 ticks");
         if (drowned[0] > 0 || drowned[1] >= 20) {
             throw new AssertionError(
                     "Expected the air to run out and drowning damage to start, air was " + drowned[0]
@@ -269,8 +272,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.drowning-off",
-                "The same two seconds with the rule off",
-                "Vanilla air lasts fifteen seconds, so the bar has barely moved"
+                "The same two seconds, rule off",
+                "Vanilla air barely moves"
         );
         server.runOnServer(current -> {
             current.overworld().getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
@@ -279,9 +282,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             player.setHealth(player.getMaxHealth());
         });
         context.waitTicks(4);
-        reportAir(context, server, playerId, "start");
+        reportAir(context, server, playerId, DROWNING_OFF_STEP, DROWNING_OFF_TITLE, "start");
         context.waitTicks(40);
-        int[] vanillaAir = reportAir(context, server, playerId, "40 ticks");
+        int[] vanillaAir = reportAir(context, server, playerId, DROWNING_OFF_STEP, DROWNING_OFF_TITLE, "40 ticks");
         if (vanillaAir[0] < 200 || vanillaAir[1] != 20) {
             throw new AssertionError(
                     "Expected vanilla air to last, air was " + vanillaAir[0] + " and health " + vanillaAir[1]
@@ -290,12 +293,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         server.runOnServer(current -> player(current, playerId).setAirSupply(player(current, playerId).getMaxAirSupply()));
     }
 
-    private static int[] reportAir(ClientGameTestContext context, TestDedicatedServerContext server, int playerId, String label) {
+    private static int[] reportAir(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int playerId,
+            String stepId,
+            String stepTitle,
+            String label
+    ) {
         int[] state = server.computeOnServer(current -> {
             ServerPlayer player = player(current, playerId);
             return new int[]{player.getAirSupply(), Math.round(player.getHealth())};
         });
-        ClientGameTestRecorder.log(context, label + ": air " + state[0] + " health " + state[1]);
+        String reading = label + ": air " + state[0] + ", health " + state[1];
+        ClientGameTestRecorder.showStep(context, stepId, stepTitle, reading);
+        ClientGameTestRecorder.log(context, reading);
         return state;
     }
 
@@ -304,18 +316,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context,
                 "showcase.bow",
                 "Bow: five arrows in one second",
-                "Each one-tick draw fires a full-power arrow at the player target"
+                "One tick of draw, a full-power arrow"
         );
-        int targetId = shootStage(context, server, playerId, "BowDummy", Items.BOW, Items.ARROW, 5);
+        int targetId = shootStage(context, server, playerId, "BowDummy", Items.BOW, Items.ARROW, 5,
+                "showcase.bow", "Bow: five arrows in one second");
         server.runOnServer(current -> removeTarget(current, targetId));
 
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.bow-off",
-                "The same shots with the rule off",
-                "Only the first arrow inside the cooldown window lands"
+                "The same shots, rule off",
+                "Only the first arrow lands in full"
         );
-        int vanillaTargetId = shootStage(context, server, playerId, "BowDummyOff", Items.BOW, Items.ARROW, 2, false);
+        int vanillaTargetId = shootStage(context, server, playerId, "BowDummyOff", Items.BOW, Items.ARROW, 2, false,
+                "showcase.bow-off", "The same shots, rule off");
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
 
@@ -323,19 +337,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.crossbow",
-                "Crossbow: five shots in under two seconds",
-                "Loading takes one tick and every bolt inside the window lands"
+                "Crossbow: five shots",
+                "One-tick load, every bolt lands"
         );
-        int targetId = shootStage(context, server, playerId, "CrossbowDummy", Items.CROSSBOW, Items.ARROW, 5);
+        int targetId = shootStage(context, server, playerId, "CrossbowDummy", Items.CROSSBOW, Items.ARROW, 5,
+                "showcase.crossbow", "Crossbow: five shots");
         server.runOnServer(current -> removeTarget(current, targetId));
 
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.crossbow-off",
-                "The same shots with the rule off",
-                "Only the first bolt inside the cooldown window lands"
+                "The same shots, rule off",
+                "Only the first bolt lands in full"
         );
-        int vanillaTargetId = shootStage(context, server, playerId, "CrossbowDummyOff", Items.CROSSBOW, Items.ARROW, 2, false);
+        int vanillaTargetId = shootStage(context, server, playerId, "CrossbowDummyOff", Items.CROSSBOW, Items.ARROW, 2, false,
+                "showcase.crossbow-off", "The same shots, rule off");
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
 
@@ -343,17 +359,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.trident",
-                "Trident: five throws in under two seconds",
-                "The vanilla ten-tick wind-up is gone, so every trident flies straight away"
+                "Trident: five throws",
+                "The ten-tick wind-up is gone"
         );
-        int targetId = shootStage(context, server, playerId, "TridentDummy", Items.TRIDENT, Items.TRIDENT, 5);
+        int targetId = shootStage(context, server, playerId, "TridentDummy", Items.TRIDENT, Items.TRIDENT, 5,
+                "showcase.trident", "Trident: five throws");
         server.runOnServer(current -> removeTarget(current, targetId));
 
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.trident-off",
-                "The same throws with the rule off",
-                "Only the first trident inside the cooldown window lands"
+                "The same throws, rule off",
+                "Only the first trident lands"
         );
         int vanillaTargetId = shootStage(
                 context,
@@ -363,7 +380,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 Items.TRIDENT,
                 Items.TRIDENT,
                 2,
-                false
+                false,
+                "showcase.trident-off",
+                "The same throws, rule off"
         );
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
@@ -372,8 +391,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.firework",
-                "Crossbow with firework rockets",
-                "Each rocket explodes on the target and its damage lands inside the cooldown window"
+                "Crossbow firework rockets",
+                "Each rocket explodes on the target"
         );
         int targetId = shootStage(
                 context,
@@ -382,15 +401,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "FireworkDummy",
                 Items.CROSSBOW,
                 Items.FIREWORK_ROCKET,
-                4
+                4,
+                "showcase.firework",
+                "Crossbow firework rockets"
         );
         server.runOnServer(current -> removeTarget(current, targetId));
 
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.firework-off",
-                "The same rockets with the rule off",
-                "Only the first rocket inside the cooldown window lands"
+                "The same rockets, rule off",
+                "Only the first rocket lands"
         );
         int vanillaTargetId = shootStage(
                 context,
@@ -400,7 +421,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 Items.CROSSBOW,
                 Items.FIREWORK_ROCKET,
                 2,
-                false
+                false,
+                "showcase.firework-off",
+                "The same rockets, rule off"
         );
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
@@ -414,9 +437,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             String targetName,
             Item weapon,
             Item ammunition,
-            int shots
+            int shots,
+            String stepId,
+            String stepTitle
     ) {
-        return shootStage(context, server, playerId, targetName, weapon, ammunition, shots, true);
+        return shootStage(context, server, playerId, targetName, weapon, ammunition, shots, true, stepId, stepTitle);
     }
 
     private static int shootStage(
@@ -427,14 +452,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             Item weapon,
             Item ammunition,
             int shots,
-            boolean accelerated
+            boolean accelerated,
+            String stepId,
+            String stepTitle
     ) {
         int targetId = server.computeOnServer(current -> {
             GameRules rules = current.overworld().getGameRules();
             rules.set(ModGameRules.INSTANT_SHOOT, true, current);
             rules.set(ModGameRules.DISABLE_IFRAMES, accelerated, current);
             ServerPlayer player = player(current, playerId);
-            player.teleportTo(current.overworld(), 0.5, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
+            // The ranged lane runs beside the melee wall, so a rocket that overshoots explodes in open air and still
+            // covers the target in its blast.
+            player.teleportTo(current.overworld(), RANGE_X, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
             player.setHealth(player.getMaxHealth());
             player.getInventory().clearContent();
             player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
@@ -446,12 +475,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 player.getInventory().setItem(0, new ItemStack(weapon));
             }
             if (ammunition == Items.FIREWORK_ROCKET) {
-                player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.FIREWORK_ROCKET, 32));
+                // A firework rocket only damages when it carries an explosion, which a crafted one does.
+                ItemStack rockets = new ItemStack(Items.FIREWORK_ROCKET, 32);
+                rockets.set(
+                        DataComponents.FIREWORKS,
+                        new Fireworks(1, List.of(FireworkExplosion.DEFAULT))
+                );
+                player.setItemInHand(InteractionHand.OFF_HAND, rockets);
             } else {
                 player.getInventory().setItem(8, new ItemStack(ammunition, 32));
             }
             player.getInventory().setSelectedSlot(0);
-            return spawnTarget(current, targetName, new Vec3(0.5, ARENA_Y, 4.5));
+            return spawnTarget(current, targetName, new Vec3(RANGE_X, ARENA_Y, 4.5));
         });
         context.waitTicks(4);
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
@@ -472,13 +507,30 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             } else {
                 context.getInput().holdKeyFor(options -> options.keyUse, 1);
             }
-            context.waitTicks(3);
+            // A firework rocket flies at 1.6 blocks a tick, so its explosion lands a tick later than an arrow's.
+            context.waitTicks(ammunition == Items.FIREWORK_ROCKET ? 4 : 3);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             float drop = previous[0] - health;
+            ClientGameTestRecorder.showStep(context, stepId, stepTitle, "shot " + shot + ", health " + health);
             ClientGameTestRecorder.log(context, "shot " + shot + "  target health " + health);
             if (accelerated) {
                 if (drop <= 0.0F) {
-                    throw new AssertionError("Expected shot " + shot + " to damage the target; health stayed at " + health);
+                    throw new AssertionError(
+                            "Expected shot " + shot + " to damage the target; health stayed at " + health + ": "
+                                    + server.computeOnServer(current -> {
+                                        ServerPlayer shooter = player(current, playerId);
+                                        int rockets = current.overworld()
+                                                .getEntitiesOfClass(
+                                                        FireworkRocketEntity.class,
+                                                        shooter.getBoundingBox().inflate(32.0)
+                                                )
+                                                .size();
+                                        return "charged=" + CrossbowItem.isCharged(shooter.getMainHandItem())
+                                                + " main=" + shooter.getMainHandItem()
+                                                + " off=" + shooter.getOffhandItem()
+                                                + " rocketsInFlight=" + rockets;
+                                    })
+                    );
                 }
             } else if (shot == 1) {
                 if (drop <= 0.0F) {
@@ -505,8 +557,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context,
                 "showcase.effects",
-                "Fire and poison ten times faster",
-                "Two player targets burn and wither while their health falls every couple of ticks"
+                "Fire and poison, ten times faster",
+                "Health falls every couple of ticks"
         );
         List<Integer> targets = server.computeOnServer(current -> {
             ServerLevel level = current.overworld();
@@ -525,7 +577,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         });
         for (int tick = 1; tick <= 4; tick++) {
             context.waitTicks(5);
-            ClientGameTestRecorder.log(context, server.computeOnServer(current -> effectsLabel(current, targets)));
+            String reading = server.computeOnServer(current -> effectsLabel(current, targets));
+            ClientGameTestRecorder.showStep(context, "showcase.effects", "Fire and poison, ten times faster", reading);
+            ClientGameTestRecorder.log(context, reading);
         }
         server.runOnServer(current -> {
             for (int target : targets) {
