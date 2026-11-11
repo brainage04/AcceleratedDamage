@@ -1318,6 +1318,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// has the same actions with the rule off, where vanilla rejects the repeat hit.
     private static void assertNegativeCases(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Melee: the same hits, rule off", "first hit");
         int meleeTarget =
                 server.computeOnServer(
                         current -> {
@@ -1338,9 +1341,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Melee: the same hits, rule off", "first hit");
         strikeRepeatedly(
                 context,
                 server,
@@ -1354,6 +1354,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "Melee: the same hits, rule off");
         server.runOnServer(current -> parkTarget(current, meleeTarget));
 
+        ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Bow: the same arrows, rule off", "first shot");
         int bowTarget =
                 server.computeOnServer(
                         current -> {
@@ -1370,9 +1373,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Bow: the same arrows, rule off", "first shot");
         shootRepeatedly(
                 context,
                 server,
@@ -1385,6 +1385,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "Bow: the same arrows, rule off");
         server.runOnServer(current -> parkTarget(current, bowTarget));
 
+        ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Crossbow: the same bolts, rule off", "first shot");
         int crossbowTarget =
                 server.computeOnServer(
                         current -> {
@@ -1403,9 +1406,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Crossbow: the same bolts, rule off", "first shot");
         shootLoadedCrossbowsVanilla(
                 context,
                 server,
@@ -1416,6 +1416,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "Crossbow: the same bolts, rule off");
         server.runOnServer(current -> parkTarget(current, crossbowTarget));
 
+        ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Trident: the same throws, rule off", "first shot");
         int tridentTarget =
                 server.computeOnServer(
                         current -> {
@@ -1433,9 +1436,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Trident: the same throws, rule off", "first shot");
         shootLoadedCrossbowsVanilla(
                 context,
                 server,
