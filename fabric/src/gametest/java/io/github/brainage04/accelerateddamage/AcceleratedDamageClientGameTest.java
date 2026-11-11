@@ -799,7 +799,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         float firstDrop = 0.0F;
         for (int shot = 1; shot <= shots; shot++) {
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
+            // The negative case fires both shots inside one vanilla window, so it aims once: a
+            // fresh
+            // aim before every shot would put eight ticks between them and the window would lapse.
+            if (accelerated || shot == 1) {
+                ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
+            }
             context.getInput().holdKeyFor(options -> options.keyUse, 1);
             context.waitTicks(4);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
@@ -1336,13 +1341,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             boolean holdUse) {
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
         float firstDrop = 0.0F;
+        // One aim and one selection for the whole stage: both shots then fall inside one vanilla
+        // window.
+        ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         for (int shot = 1; shot <= shots; shot++) {
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
             int hotbarSlot = shot - 1;
             context.getInput().pressKey(options -> options.keyHotbarSlots[hotbarSlot]);
-            context.waitTicks(2);
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
+            context.waitTicks(1);
             if (holdUse) {
                 context.getInput().holdKeyFor(options -> options.keyUse, 1);
             } else {
