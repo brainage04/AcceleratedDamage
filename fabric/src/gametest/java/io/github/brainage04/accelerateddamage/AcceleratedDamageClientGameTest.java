@@ -178,18 +178,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordEffectsOff(context, server, playerId);
                         recordDrowningOff(context, server, playerId);
 
-                        // The negative cases run inside the same world, so the recorder still sees
-                        // them: the caption names the tail instead of leaving a stage that looks
-                        // like
-                        // nothing happening.
                         ClientGameTestCommands.clearChat(context);
                         ClientGameTestStages.markStage("showcase.negatives");
-                        ClientGameTestRecorder.showStep(
-                                context,
-                                "showcase.negatives",
-                                "Negative cases, rule off",
-                                "Every repeat hit is refused; health is shown after each");
-                        context.waitTicks(20);
                         assertNegativeCases(context, server, playerId);
                         ClientGameTestStages.endStage("showcase.negatives");
                         ClientGameTestCommands.clearChat(context);
@@ -1325,6 +1315,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Melee: the same hits, rule off", "first hit");
         strikeRepeatedly(
                 context,
                 server,
@@ -1355,6 +1347,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Bow: the same arrows, rule off", "first shot");
         shootRepeatedly(
                 context,
                 server,
@@ -1386,6 +1380,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Crossbow: the same bolts, rule off", "first shot");
         shootLoadedCrossbowsVanilla(
                 context,
                 server,
@@ -1414,6 +1410,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.negatives", "Trident: the same throws, rule off", "first shot");
         shootLoadedCrossbowsVanilla(
                 context,
                 server,
