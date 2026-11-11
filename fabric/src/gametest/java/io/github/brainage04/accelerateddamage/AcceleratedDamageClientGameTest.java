@@ -22,6 +22,8 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.Item;
@@ -500,8 +502,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             player.teleportTo(level, 0.5, ARENA_Y, -1.5, Set.of(), 0.0F, 10.0F, false);
             player.setHealth(player.getMaxHealth());
             player.getInventory().clearContent();
-            int burning = spawnTarget(current, "BurningDummy", new Vec3(-1.5, ARENA_Y, 3.5));
-            int poisoned = spawnTarget(current, "PoisonedDummy", new Vec3(2.5, ARENA_Y, 3.5));
+            int burning = spawnMobTarget(current, "BurningDummy", -1.5, 3.5);
+            int poisoned = spawnMobTarget(current, "PoisonedDummy", 2.5, 3.5);
             living(current, burning).setRemainingFireTicks(400);
             living(current, poisoned).addEffect(new MobEffectInstance(MobEffects.POISON, 400, 2));
             return List.of(burning, poisoned);
@@ -514,10 +516,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         server.runOnServer(current -> {
             for (int target : targets) {
-                if (living(current, target).getHealth() > 14.0F) {
+                LivingEntity damaged = living(current, target);
+                if (damaged.getHealth() > 14.0F) {
+                    MobEffectInstance poison = damaged.getEffect(MobEffects.POISON);
                     throw new AssertionError(
-                            "Expected accelerated fire and poison to take more than six health in twenty ticks, "
-                                    + "health was " + living(current, target).getHealth()
+                            "Expected accelerated fire and poison to take more than six health in twenty ticks: health "
+                                    + damaged.getHealth() + " fireTicks " + damaged.getRemainingFireTicks()
+                                    + " poison " + (poison == null
+                                    ? "none"
+                                    : poison.getDuration() + " ticks at level " + poison.getAmplifier())
                     );
                 }
                 removeTarget(current, target);
@@ -541,7 +548,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ServerLevel level = current.overworld();
             GameRules rules = level.getGameRules();
             rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
-            int target = spawnTarget(current, "SlowDummy", new Vec3(0.5, ARENA_Y, 3.5));
+            int target = spawnMobTarget(current, "SlowDummy", 0.5, 3.5);
             LivingEntity living = living(current, target);
             living.setHealth(living.getMaxHealth());
             living.setRemainingFireTicks(400);
@@ -606,6 +613,24 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.getInventory().setItem(0, new ItemStack(Items.WOODEN_SWORD));
     }
 
+    /// A mob target for the environmental stages: a mob ticks its own fire and effects, which the recorded player's
+    /// targets exist to be hit by, not to burn.
+    private static int spawnMobTarget(MinecraftServer server, String name, double x, double z) {
+        ServerLevel level = server.overworld();
+        net.minecraft.world.entity.Mob target = (net.minecraft.world.entity.Mob) EntityTypes.ZOMBIE
+                .create(level, EntitySpawnReason.COMMAND);
+        if (target == null) {
+            throw new AssertionError("Expected to create " + name);
+        }
+        target.setPos(x, ARENA_Y, z);
+        target.setNoAi(true);
+        target.setPersistenceRequired();
+        target.setCustomName(Component.literal(name));
+        target.setCustomNameVisible(true);
+        level.addFreshEntity(target);
+        return target.getId();
+    }
+
     private static Vec3 chest(TestDedicatedServerContext server, int entityId) {
         return server.computeOnServer(current -> entity(current, entityId).getBoundingBox().getCenter());
     }
@@ -655,8 +680,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     private static void removeTarget(MinecraftServer server, int entityId) {
-        if (server.overworld().getEntity(entityId) instanceof ServerPlayer target) {
-            server.getPlayerList().remove(target);
+        Entity target = server.overworld().getEntity(entityId);
+        if (target instanceof ServerPlayer player) {
+            server.getPlayerList().remove(player);
+        } else if (target != null) {
+            target.discard();
         }
     }
 
