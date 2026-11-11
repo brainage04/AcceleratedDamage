@@ -790,6 +790,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             String stepId,
             String stepTitle) {
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
+        // while the
+        // client's carried item is empty, whatever the server's main hand holds.
+        context.getInput().pressKey(options -> options.keyHotbarSlots[0]);
+        context.waitTicks(2);
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         float firstDrop = 0.0F;
         for (int shot = 1; shot <= shots; shot++) {
@@ -1186,7 +1191,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "MeleeDummyOff",
                                     new Vec3(0.5, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(4);
         strikeRepeatedly(
