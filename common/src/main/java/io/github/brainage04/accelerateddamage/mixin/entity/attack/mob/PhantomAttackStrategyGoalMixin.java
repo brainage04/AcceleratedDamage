@@ -10,20 +10,20 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(targets = "net.minecraft.world.entity.monster.Phantom$PhantomAttackStrategyGoal")
 public abstract class PhantomAttackStrategyGoalMixin {
-    @Shadow
-    private int nextSweepTick;
+    @Shadow private int nextSweepTick;
 
     /** Time spent circling before the next swoop, {@code nextSweepTick--} (160 to 239 ticks). */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/monster/Phantom$PhantomAttackStrategyGoal;nextSweepTick:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/monster/Phantom$PhantomAttackStrategyGoal;nextSweepTick:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$countDownFaster(@Coerce Object self, int vanillaValue) {
-        nextSweepTick = VirtualTime.isEnabled() ? vanillaValue - VirtualTime.LAST_OFFSET : vanillaValue;
+        nextSweepTick =
+                VirtualTime.isEnabled() ? vanillaValue - VirtualTime.LAST_OFFSET : vanillaValue;
     }
 }

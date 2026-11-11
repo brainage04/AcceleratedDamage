@@ -20,24 +20,25 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(RangedCrossbowAttackGoal.class)
 public abstract class RangedCrossbowAttackGoalMixin {
-    @Shadow
-    private int attackDelay;
+    @Shadow private int attackDelay;
 
     /** Virtual ticks the accelerated charge ran past the charge duration before it was released. */
-    @Unique
-    private int acceleratedDamage$chargeOverrun;
+    @Unique private int acceleratedDamage$chargeOverrun;
 
-    /** Charge check {@code pullTime >= getChargeDuration}: records the overrun for the aim delay. */
+    /**
+     * Charge check {@code pullTime >= getChargeDuration}: records the overrun for the aim delay.
+     */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/item/CrossbowItem;getChargeDuration(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;)I"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/item/CrossbowItem;getChargeDuration(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;)I"))
     private int acceleratedDamage$measureChargeOverrun(ItemStack crossbow, LivingEntity user) {
         int chargeDuration = CrossbowItem.getChargeDuration(crossbow, user);
-        this.acceleratedDamage$chargeOverrun = Math.max(0, user.getTicksUsingItem() - chargeDuration);
+        this.acceleratedDamage$chargeOverrun =
+                Math.max(0, user.getTicksUsingItem() - chargeDuration);
         return chargeDuration;
     }
 
@@ -49,32 +50,42 @@ public abstract class RangedCrossbowAttackGoalMixin {
      */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal;attackDelay:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
-    private void acceleratedDamage$shortenAimDelay(RangedCrossbowAttackGoal<?> self, int vanillaDelay) {
-        this.attackDelay = VirtualTime.isEnabled()
-                ? Math.max(1, vanillaDelay - 2 * VirtualTime.LAST_OFFSET - this.acceleratedDamage$chargeOverrun)
-                : vanillaDelay;
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal;attackDelay:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
+    private void acceleratedDamage$shortenAimDelay(
+            RangedCrossbowAttackGoal<?> self, int vanillaDelay) {
+        this.attackDelay =
+                VirtualTime.isEnabled()
+                        ? Math.max(
+                                1,
+                                vanillaDelay
+                                        - 2 * VirtualTime.LAST_OFFSET
+                                        - this.acceleratedDamage$chargeOverrun)
+                        : vanillaDelay;
     }
 
-    /** Aim delay countdown {@code attackDelay--} (checked {@code == 0}), stepped by 10 and floored at 0. */
+    /**
+     * Aim delay countdown {@code attackDelay--} (checked {@code == 0}), stepped by 10 and floored
+     * at 0.
+     */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal;attackDelay:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 1
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/goal/RangedCrossbowAttackGoal;attackDelay:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 1))
     private void acceleratedDamage$aimFaster(RangedCrossbowAttackGoal<?> self, int vanillaValue) {
-        this.attackDelay = vanillaValue > 0 && VirtualTime.isEnabled()
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
-                : vanillaValue;
+        this.attackDelay =
+                vanillaValue > 0 && VirtualTime.isEnabled()
+                        ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                        : vanillaValue;
     }
 }

@@ -10,33 +10,57 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(DragonStrafePlayerPhase.class)
 public abstract class DragonStrafePlayerPhaseMixin {
-    @Shadow
-    private int fireballCharge;
+    @Shadow private int fireballCharge;
 
-    /** Fireball charge {@code fireballCharge++}; the dragon fires once it reaches 5 while facing the target. */
+    /**
+     * Fireball charge {@code fireballCharge++}; the dragon fires once it reaches 5 while facing the
+     * target.
+     */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I", opcode = Opcodes.PUTFIELD, ordinal = 0)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$up0(DragonStrafePlayerPhase self, int vanillaValue) {
-        fireballCharge = VirtualTime.isEnabled() ? fireballCharge + VirtualTime.ACCELERATION : vanillaValue;
+        fireballCharge =
+                VirtualTime.isEnabled() ? fireballCharge + VirtualTime.ACCELERATION : vanillaValue;
     }
 
     /** Charge decay {@code fireballCharge--} when the target is out of sight. */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I", opcode = Opcodes.PUTFIELD, ordinal = 2)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 2))
     private void acceleratedDamage$down2(DragonStrafePlayerPhase self, int vanillaValue) {
-        fireballCharge = VirtualTime.isEnabled() ? Math.max(0, fireballCharge - VirtualTime.ACCELERATION) : vanillaValue;
+        fireballCharge =
+                VirtualTime.isEnabled()
+                        ? Math.max(0, fireballCharge - VirtualTime.ACCELERATION)
+                        : vanillaValue;
     }
 
     /** Charge decay {@code fireballCharge--} when the target is out of range. */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I", opcode = Opcodes.PUTFIELD, ordinal = 3)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonStrafePlayerPhase;fireballCharge:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 3))
     private void acceleratedDamage$down3(DragonStrafePlayerPhase self, int vanillaValue) {
-        fireballCharge = VirtualTime.isEnabled() ? Math.max(0, fireballCharge - VirtualTime.ACCELERATION) : vanillaValue;
+        fireballCharge =
+                VirtualTime.isEnabled()
+                        ? Math.max(0, fireballCharge - VirtualTime.ACCELERATION)
+                        : vanillaValue;
     }
 }

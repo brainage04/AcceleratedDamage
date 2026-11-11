@@ -13,15 +13,19 @@ public abstract class NautilusMixin {
     @Shadow
     protected abstract void handleAirSupply(ServerLevel level, int preTickAirSupply);
 
-    /** Runs the drying-out step once per virtual tick; the first step uses the vanilla pre-tick air supply. */
+    /**
+     * Runs the drying-out step once per virtual tick; the first step uses the vanilla pre-tick air
+     * supply.
+     */
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/animal/nautilus/Nautilus;handleAirSupply(Lnet/minecraft/server/level/ServerLevel;I)V"
-            )
-    )
-    private void acceleratedDamage$handleAirSupplyFaster(Nautilus self, ServerLevel level, int preTickAirSupply) {
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/animal/nautilus/Nautilus;handleAirSupply(Lnet/minecraft/server/level/ServerLevel;I)V"))
+    private void acceleratedDamage$handleAirSupplyFaster(
+            Nautilus self, ServerLevel level, int preTickAirSupply) {
         if (!VirtualTime.isEnabled(self.level())) {
             handleAirSupply(level, preTickAirSupply);
             return;

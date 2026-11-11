@@ -12,26 +12,24 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(Bee.class)
 public abstract class BeeMixin {
-    @Shadow
-    private int underWaterTicks;
+    @Shadow private int underWaterTicks;
 
-    @Shadow
-    private int timeSinceSting;
+    @Shadow private int timeSinceSting;
 
     /** Bees start drowning after 20 ticks underwater. */
     @Redirect(
             method = "customServerAiStep",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/animal/bee/Bee;underWaterTicks:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/animal/bee/Bee;underWaterTicks:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$countUnderwaterTicksFaster(Bee self, int vanillaValue) {
-        underWaterTicks = VirtualTime.isEnabled(self.level())
-                ? vanillaValue + VirtualTime.LAST_OFFSET
-                : vanillaValue;
+        underWaterTicks =
+                VirtualTime.isEnabled(self.level())
+                        ? vanillaValue + VirtualTime.LAST_OFFSET
+                        : vanillaValue;
     }
 
     /**
@@ -40,12 +38,11 @@ public abstract class BeeMixin {
      */
     @Redirect(
             method = "customServerAiStep",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/animal/bee/Bee;timeSinceSting:I",
-                    opcode = Opcodes.PUTFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/animal/bee/Bee;timeSinceSting:I",
+                            opcode = Opcodes.PUTFIELD))
     private void acceleratedDamage$ageStingFaster(Bee self, int vanillaValue) {
         if (!(self.level() instanceof ServerLevel level) || !VirtualTime.isEnabled(level)) {
             timeSinceSting = vanillaValue;

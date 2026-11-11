@@ -6,8 +6,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 
 /**
- * The compressed timeline used by {@code faster_effect_ticking}: every server tick covers
- * {@link #ACCELERATION} virtual ticks, numbered by offset {@code 0..LAST_OFFSET}.
+ * The compressed timeline used by {@code faster_effect_ticking}: every server tick covers {@link
+ * #ACCELERATION} virtual ticks, numbered by offset {@code 0..LAST_OFFSET}.
  *
  * <p>Code that replays several virtual ticks inside one server tick enters the offset of the
  * virtual tick it is simulating, so the damage-immunity window can be measured in virtual ticks.
@@ -17,10 +17,10 @@ public final class VirtualTime {
     public static final int ACCELERATION = 10;
     public static final int LAST_OFFSET = ACCELERATION - 1;
 
-    private static final ThreadLocal<int[]> OFFSET = ThreadLocal.withInitial(() -> new int[]{LAST_OFFSET});
+    private static final ThreadLocal<int[]> OFFSET =
+            ThreadLocal.withInitial(() -> new int[] {LAST_OFFSET});
 
-    private VirtualTime() {
-    }
+    private VirtualTime() {}
 
     public static boolean isEnabled(Level level) {
         return level instanceof ServerLevel serverLevel
@@ -44,7 +44,9 @@ public final class VirtualTime {
         OFFSET.get()[0] = previousOffset;
     }
 
-    /** Virtual ticks that still elapse in the current server tick after the running virtual tick. */
+    /**
+     * Virtual ticks that still elapse in the current server tick after the running virtual tick.
+     */
     public static int remainingInTick() {
         return LAST_OFFSET - OFFSET.get()[0];
     }

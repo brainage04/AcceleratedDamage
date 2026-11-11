@@ -10,14 +10,20 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(DragonSittingFlamingPhase.class)
 public abstract class DragonSittingFlamingPhaseMixin {
-    @Shadow
-    private int flameTicks;
+    @Shadow private int flameTicks;
 
-    /** Breath {@code flameTicks++}: the breath cloud spawns at exactly 10 and the phase ends at 200. */
+    /**
+     * Breath {@code flameTicks++}: the breath cloud spawns at exactly 10 and the phase ends at 200.
+     */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingFlamingPhase;flameTicks:I", opcode = Opcodes.PUTFIELD, ordinal = 0)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingFlamingPhase;flameTicks:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$up0(DragonSittingFlamingPhase self, int vanillaValue) {
         flameTicks = VirtualTime.isEnabled() ? flameTicks + VirtualTime.ACCELERATION : vanillaValue;
     }

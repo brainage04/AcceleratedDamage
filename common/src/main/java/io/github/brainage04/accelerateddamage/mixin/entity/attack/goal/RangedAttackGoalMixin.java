@@ -13,12 +13,9 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 /** Snow golem, witch, llama spit, drowned trident and the wither's main head. */
 @Mixin(RangedAttackGoal.class)
 public abstract class RangedAttackGoalMixin {
-    @Shadow
-    @Final
-    private Mob mob;
+    @Shadow @Final private Mob mob;
 
-    @Shadow
-    private int attackTime;
+    @Shadow private int attackTime;
 
     /**
      * Shot interval {@code attackTime} ({@code --attackTime == 0}): the read feeding the decrement
@@ -27,13 +24,13 @@ public abstract class RangedAttackGoalMixin {
      */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/goal/RangedAttackGoal;attackTime:I",
-                    opcode = Opcodes.GETFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/goal/RangedAttackGoal;attackTime:I",
+                            opcode = Opcodes.GETFIELD,
+                            ordinal = 0))
     private int acceleratedDamage$countDownFaster(RangedAttackGoal self) {
         return this.attackTime > 0 && VirtualTime.isEnabled(this.mob.level())
                 ? Math.max(1, this.attackTime - VirtualTime.LAST_OFFSET)

@@ -14,26 +14,30 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class ServerPlayerMixin {
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/server/level/ServerPlayer;damageCooldownTime:I",
-                    opcode = Opcodes.PUTFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/server/level/ServerPlayer;damageCooldownTime:I",
+                            opcode = Opcodes.PUTFIELD))
     private void acceleratedDamage$decayInvulnerabilityFaster(ServerPlayer self, int vanillaValue) {
-        self.damageCooldownTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
-                : vanillaValue;
+        self.damageCooldownTime =
+                VirtualTime.isEnabled(self.level())
+                        ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                        : vanillaValue;
     }
 
-    /** Natural regeneration, starvation and exhaustion all advance through one virtual tick per call. */
+    /**
+     * Natural regeneration, starvation and exhaustion all advance through one virtual tick per
+     * call.
+     */
     @Redirect(
             method = "doTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/food/FoodData;tick(Lnet/minecraft/server/level/ServerPlayer;)V"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/food/FoodData;tick(Lnet/minecraft/server/level/ServerPlayer;)V"))
     private void acceleratedDamage$tickFoodFaster(FoodData foodData, ServerPlayer player) {
         if (!VirtualTime.isEnabled(player.level())) {
             foodData.tick(player);
@@ -49,8 +53,13 @@ public abstract class ServerPlayerMixin {
         }
     }
 
-    /** Peaceful regeneration: health every 20 ticks and food every 10 ticks, on the compressed timeline. */
-    @ModifyConstant(method = "tickRegeneration", constant = {@Constant(intValue = 20), @Constant(intValue = 10)})
+    /**
+     * Peaceful regeneration: health every 20 ticks and food every 10 ticks, on the compressed
+     * timeline.
+     */
+    @ModifyConstant(
+            method = "tickRegeneration",
+            constant = {@Constant(intValue = 20), @Constant(intValue = 10)})
     private int acceleratedDamage$shortenPeacefulRegeneration(int original) {
         return VirtualTime.isEnabled(((ServerPlayer) (Object) this).level())
                 ? original / VirtualTime.ACCELERATION

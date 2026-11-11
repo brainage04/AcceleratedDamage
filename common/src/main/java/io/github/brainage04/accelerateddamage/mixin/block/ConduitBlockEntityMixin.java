@@ -12,17 +12,13 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
 @Mixin(ConduitBlockEntity.class)
 public abstract class ConduitBlockEntityMixin {
     /**
-     * Every 40 game ticks a conduit refreshes its shape, re-applies Conduit Power and attacks a hostile mob.
-     * The refresh has to speed up too, because the effect it re-applies wears off ten times faster.
+     * Every 40 game ticks a conduit refreshes its shape, re-applies Conduit Power and attacks a
+     * hostile mob. The refresh has to speed up too, because the effect it re-applies wears off ten
+     * times faster.
      */
     @ModifyConstant(method = "serverTick", constant = @Constant(longValue = 40L))
     private static long acceleratedDamage$pulseFaster(
-            long original,
-            Level level,
-            BlockPos pos,
-            BlockState state,
-            ConduitBlockEntity entity
-    ) {
+            long original, Level level, BlockPos pos, BlockState state, ConduitBlockEntity entity) {
         return VirtualTime.isEnabled(level) ? original / VirtualTime.ACCELERATION : original;
     }
 }

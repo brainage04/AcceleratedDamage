@@ -13,15 +13,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(CrossbowItem.class)
 public class CrossbowItemMixin {
     @Inject(
-            method = "getChargeDuration(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;)I",
+            method =
+                    "getChargeDuration(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;)I",
             at = @At("HEAD"),
-            cancellable = true
-    )
+            cancellable = true)
     private static void acceleratedDamage$chargeImmediately(
-            ItemStack stack,
-            LivingEntity user,
-            CallbackInfoReturnable<Integer> cir
-    ) {
+            ItemStack stack, LivingEntity user, CallbackInfoReturnable<Integer> cir) {
         if (user.level() instanceof ServerLevel level
                 && level.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
             cir.setReturnValue(0);

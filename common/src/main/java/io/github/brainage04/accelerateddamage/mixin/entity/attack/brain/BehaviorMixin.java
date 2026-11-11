@@ -16,23 +16,26 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Behavior.class)
 public abstract class BehaviorMixin {
-    @Shadow
-    private long endTimestamp;
+    @Shadow private long endTimestamp;
 
     /**
-     * The run length of attack behaviors whose timeout ends the attack: the warden's 60-tick sonic boom and the
-     * breeze's 20-tick shot. Other behaviors keep their vanilla timeout.
+     * The run length of attack behaviors whose timeout ends the attack: the warden's 60-tick sonic
+     * boom and the breeze's 20-tick shot. Other behaviors keep their vanilla timeout.
      */
     @Inject(
             method = "tryStart",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/behavior/Behavior;endTimestamp:J",
-                    opcode = Opcodes.PUTFIELD,
-                    shift = At.Shift.AFTER
-            )
-    )
-    private void acceleratedDamage$shortenAttackDuration(ServerLevel level, LivingEntity body, long timestamp, CallbackInfoReturnable<Boolean> cir) {
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/behavior/Behavior;endTimestamp:J",
+                            opcode = Opcodes.PUTFIELD,
+                            shift = At.Shift.AFTER))
+    private void acceleratedDamage$shortenAttackDuration(
+            ServerLevel level,
+            LivingEntity body,
+            long timestamp,
+            CallbackInfoReturnable<Boolean> cir) {
         Object self = this;
         if ((self instanceof SonicBoom || self instanceof Shoot) && VirtualTime.isEnabled(level)) {
             endTimestamp = timestamp + acceleratedDamage$scaleTimer(endTimestamp - timestamp);
@@ -40,11 +43,14 @@ public abstract class BehaviorMixin {
     }
 
     /**
-     * Scales a vanilla brain timer whose event fires {@code vanillaTicks + 1} ticks after it is set (memory
-     * expiry and {@code Behavior} timeouts both behave this way) to the server tick nearest a tenth of that.
+     * Scales a vanilla brain timer whose event fires {@code vanillaTicks + 1} ticks after it is set
+     * (memory expiry and {@code Behavior} timeouts both behave this way) to the server tick nearest
+     * a tenth of that.
      */
     @Unique
     private static long acceleratedDamage$scaleTimer(long vanillaTicks) {
-        return Math.max(0L, (vanillaTicks + 1 + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION - 1);
+        return Math.max(
+                0L,
+                (vanillaTicks + 1 + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION - 1);
     }
 }

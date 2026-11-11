@@ -12,15 +12,19 @@ public abstract class AgeableWaterCreatureMixin {
     @Shadow
     protected abstract void handleAirSupply(int preTickAirSupply);
 
-    /** Runs the drowning-out-of-water step once per virtual tick; the first step uses the vanilla pre-tick air supply. */
+    /**
+     * Runs the drowning-out-of-water step once per virtual tick; the first step uses the vanilla
+     * pre-tick air supply.
+     */
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/animal/AgeableWaterCreature;handleAirSupply(I)V"
-            )
-    )
-    private void acceleratedDamage$handleAirSupplyFaster(AgeableWaterCreature self, int preTickAirSupply) {
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/animal/AgeableWaterCreature;handleAirSupply(I)V"))
+    private void acceleratedDamage$handleAirSupplyFaster(
+            AgeableWaterCreature self, int preTickAirSupply) {
         if (!VirtualTime.isEnabled(self.level())) {
             handleAirSupply(preTickAirSupply);
             return;

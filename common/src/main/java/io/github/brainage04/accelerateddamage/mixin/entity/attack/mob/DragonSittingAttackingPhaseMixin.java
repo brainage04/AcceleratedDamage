@@ -10,15 +10,20 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(DragonSittingAttackingPhase.class)
 public abstract class DragonSittingAttackingPhaseMixin {
-    @Shadow
-    private int attackingTicks;
+    @Shadow private int attackingTicks;
 
     /** Perched roar {@code attackingTicks++ >= 40} before it switches back to breathing. */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingAttackingPhase;attackingTicks:I", opcode = Opcodes.PUTFIELD, ordinal = 0)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingAttackingPhase;attackingTicks:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$up0(DragonSittingAttackingPhase self, int vanillaValue) {
-        attackingTicks = VirtualTime.isEnabled() ? attackingTicks + VirtualTime.ACCELERATION : vanillaValue;
+        attackingTicks =
+                VirtualTime.isEnabled() ? attackingTicks + VirtualTime.ACCELERATION : vanillaValue;
     }
 }

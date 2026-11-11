@@ -15,31 +15,27 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(MobEffectInstance.class)
 public abstract class MobEffectInstanceMixin {
-    @Shadow
-    private int duration;
+    @Shadow private int duration;
 
-    /** Bit {@code n} is set when the effect applies at virtual tick offset {@code n} of this server tick. */
-    @Unique
-    private int acceleratedDamage$pendingOffsets;
+    /**
+     * Bit {@code n} is set when the effect applies at virtual tick offset {@code n} of this server
+     * tick.
+     */
+    @Unique private int acceleratedDamage$pendingOffsets;
 
-    @Unique
-    private int acceleratedDamage$infiniteTick;
+    @Unique private int acceleratedDamage$infiniteTick;
 
-    @Unique
-    private boolean acceleratedDamage$wasAcceleratingInfinite;
+    @Unique private boolean acceleratedDamage$wasAcceleratingInfinite;
 
     @Redirect(
             method = "tickServer",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/effect/MobEffect;shouldApplyEffectTickThisTick(II)Z"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/effect/MobEffect;shouldApplyEffectTickThisTick(II)Z"))
     private boolean acceleratedDamage$collectApplicationOffsets(
-            MobEffect effect,
-            int tick,
-            int amplifier
-    ) {
+            MobEffect effect, int tick, int amplifier) {
         acceleratedDamage$pendingOffsets = 0;
         if (!VirtualTime.isEnabled()) {
             acceleratedDamage$wasAcceleratingInfinite = false;
@@ -73,17 +69,13 @@ public abstract class MobEffectInstanceMixin {
 
     @Redirect(
             method = "tickServer",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/effect/MobEffect;applyEffectTick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/LivingEntity;I)Z"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/effect/MobEffect;applyEffectTick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/LivingEntity;I)Z"))
     private boolean acceleratedDamage$applyAtEachOffset(
-            MobEffect effect,
-            ServerLevel level,
-            LivingEntity entity,
-            int amplifier
-    ) {
+            MobEffect effect, ServerLevel level, LivingEntity entity, int amplifier) {
         int offsets = acceleratedDamage$pendingOffsets;
         acceleratedDamage$pendingOffsets = 0;
         if (offsets == 0) {
@@ -106,17 +98,16 @@ public abstract class MobEffectInstanceMixin {
 
     @Redirect(
             method = "tickDownDuration",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/effect/MobEffectInstance;mapDuration(Lit/unimi/dsi/fastutil/ints/Int2IntFunction;)I"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/effect/MobEffectInstance;mapDuration(Lit/unimi/dsi/fastutil/ints/Int2IntFunction;)I"))
     private int acceleratedDamage$decrementDurationFaster(
-            MobEffectInstance instance,
-            Int2IntFunction vanillaMapper
-    ) {
+            MobEffectInstance instance, Int2IntFunction vanillaMapper) {
         if (VirtualTime.isEnabled()) {
-            return instance.mapDuration(duration -> Math.max(0, duration - VirtualTime.ACCELERATION));
+            return instance.mapDuration(
+                    duration -> Math.max(0, duration - VirtualTime.ACCELERATION));
         }
         return instance.mapDuration(vanillaMapper);
     }

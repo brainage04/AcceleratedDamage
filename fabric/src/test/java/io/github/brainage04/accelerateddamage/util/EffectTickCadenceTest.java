@@ -1,10 +1,10 @@
 package io.github.brainage04.accelerateddamage.util;
 
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
 
 class EffectTickCadenceTest {
     @Test
@@ -26,7 +26,6 @@ class EffectTickCadenceTest {
     void clampsCollapsedAmplifierIntervalsToEveryTick() {
         assertTrue(EffectTickCadence.crossesScheduledTick(7, 0, 10));
     }
-
 
     @Test
     void countsEveryScheduledTickInDescendingFiniteWindows() {

@@ -1,15 +1,14 @@
 package io.github.brainage04.accelerateddamage.util;
 
-import io.github.brainage04.accelerateddamage.platform.AcceleratedDamagePlatform;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
+import io.github.brainage04.accelerateddamage.platform.AcceleratedDamagePlatform;
 import net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 
 public final class EffectSyncTicker {
-    private EffectSyncTicker() {
-    }
+    private EffectSyncTicker() {}
 
     public static void initialize(AcceleratedDamagePlatform platform) {
         platform.registerEndServerTick(EffectSyncTicker::syncEffects);
@@ -22,7 +21,8 @@ public final class EffectSyncTicker {
         }
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             for (MobEffectInstance effect : player.getActiveEffects()) {
-                player.connection.send(new ClientboundUpdateMobEffectPacket(player.getId(), effect, true));
+                player.connection.send(
+                        new ClientboundUpdateMobEffectPacket(player.getId(), effect, true));
             }
         }
     }

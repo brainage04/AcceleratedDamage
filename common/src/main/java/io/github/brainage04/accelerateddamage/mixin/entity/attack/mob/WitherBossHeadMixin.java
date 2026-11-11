@@ -10,9 +10,9 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Side heads: {@code nextHeadUpdate = tickCount + 10 + nextInt(10)} while idle and
- * {@code tickCount + 40 + nextInt(20)} after a skull. The fixed part moves into the random call,
- * which returns the whole delay divided by 10 and rounded, so the random spread is kept.
+ * Side heads: {@code nextHeadUpdate = tickCount + 10 + nextInt(10)} while idle and {@code tickCount
+ * + 40 + nextInt(20)} after a skull. The fixed part moves into the random call, which returns the
+ * whole delay divided by 10 and rounded, so the random spread is kept.
  */
 @Mixin(WitherBoss.class)
 public abstract class WitherBossHeadMixin {
@@ -23,8 +23,11 @@ public abstract class WitherBossHeadMixin {
 
     @Redirect(
             method = "customServerAiStep",
-            at = @At(value = "INVOKE", target = "Lnet/minecraft/util/RandomSource;nextInt(I)I", ordinal = 0)
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/util/RandomSource;nextInt(I)I",
+                            ordinal = 0))
     private int acceleratedDamage$idleDelay(RandomSource random, int bound) {
         return acceleratedDamage$delay(random, 10, bound);
     }
@@ -36,8 +39,11 @@ public abstract class WitherBossHeadMixin {
 
     @Redirect(
             method = "customServerAiStep",
-            at = @At(value = "INVOKE", target = "Lnet/minecraft/util/RandomSource;nextInt(I)I", ordinal = 1)
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/util/RandomSource;nextInt(I)I",
+                            ordinal = 1))
     private int acceleratedDamage$shotDelay(RandomSource random, int bound) {
         return acceleratedDamage$delay(random, 40, bound);
     }
@@ -46,6 +52,7 @@ public abstract class WitherBossHeadMixin {
         if (!VirtualTime.isEnabled(((WitherBoss) (Object) this).level())) {
             return random.nextInt(bound);
         }
-        return (base + random.nextInt(bound) + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION;
+        return (base + random.nextInt(bound) + VirtualTime.ACCELERATION / 2)
+                / VirtualTime.ACCELERATION;
     }
 }

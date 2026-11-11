@@ -10,20 +10,20 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(targets = "net.minecraft.world.entity.monster.Shulker$ShulkerAttackGoal")
 public abstract class ShulkerAttackGoalMixin {
-    @Shadow
-    private int attackTime;
+    @Shadow private int attackTime;
 
     /** Bullet interval {@code attackTime--}, reset to {@code 20 + 10k} after each shot. */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/monster/Shulker$ShulkerAttackGoal;attackTime:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/monster/Shulker$ShulkerAttackGoal;attackTime:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$countDownFaster(@Coerce Object self, int vanillaValue) {
-        attackTime = VirtualTime.isEnabled() ? vanillaValue - VirtualTime.LAST_OFFSET : vanillaValue;
+        attackTime =
+                VirtualTime.isEnabled() ? vanillaValue - VirtualTime.LAST_OFFSET : vanillaValue;
     }
 }
