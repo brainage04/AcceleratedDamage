@@ -88,13 +88,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordTrident(context, server, playerId);
                         recordEffects(context, server, playerId);
 
-                        ClientGameTestRecorder.showStep(
-                                context,
-                                "showcase.done",
-                                "Accelerated Damage",
-                                "Rules off land once per window"
-                        );
-                        context.waitTicks(20);
                         ClientGameTestRecorder.stopRecording(context);
 
                         assertEffectsOff(context, server, playerId);
