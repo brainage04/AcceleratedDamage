@@ -396,6 +396,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordMelee(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.melee",
+                "Rapid melee: every hit lands",
+                "Five sword hits, one per tick of the window");
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -416,11 +421,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     false);
                         });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.melee",
-                "Rapid melee: every hit lands",
-                "Five sword hits, one per tick of the window");
         strikeRepeatedly(
                 context,
                 server,
@@ -469,7 +469,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             if (filmed) {
                 ClientGameTestRecorder.showStep(
-                        context, stepId, stepTitle, "hit " + hit + ", health " + health);
+                        context, stepId, stepTitle, "hit " + hit + ", health " + health(health));
             }
             ClientGameTestRecorder.log(context, "hit " + hit + "  target health " + health);
             if (accelerated && health >= previous) {
@@ -500,6 +500,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordDrowning(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.drowning",
+                "Drowning in two seconds",
+                "Air empties ten times faster");
         server.runOnServer(
                 current -> {
                     GameRules rules = current.overworld().getGameRules();
@@ -517,11 +522,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     false);
                 });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.drowning",
-                "Drowning in two seconds",
-                "Air empties ten times faster");
         ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
         // The camera and the title card cost ticks under water, so the reading starts from a full
         // lung.
@@ -578,6 +578,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// loses a bubble a second instead of the whole lung.
     private static void recordDrowningOff(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.drowning-off",
+                "The same two seconds, vanilla",
+                "Air falls one tick a second, health holds");
         server.runOnServer(
                 current -> {
                     current.overworld()
@@ -596,11 +601,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     false);
                 });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.drowning-off",
-                "The same two seconds, vanilla",
-                "Air falls one tick a second, health holds");
         ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
         server.runOnServer(current -> healPlayer(current, playerId));
         reportAir(
@@ -666,6 +666,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordBow(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.bow",
+                "Bow: five arrows in one second",
+                "One tick of draw, a full-power arrow");
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -682,11 +687,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.bow",
-                "Bow: five arrows in one second",
-                "One tick of draw, a full-power arrow");
         shootRepeatedly(
                 context,
                 server,
@@ -705,6 +705,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// the stage beats the bow's one arrow per draw.
     private static void recordCrossbow(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.crossbow",
+                "Crossbow: five loaded crossbows",
+                "No loading, five bolts in three quarters of a second");
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -723,11 +728,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.crossbow",
-                "Crossbow: five loaded crossbows",
-                "No loading, five bolts in three quarters of a second");
         shootLoadedCrossbows(
                 context,
                 server,
@@ -748,6 +748,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// then deals no damage at all.
     private static void recordFirework(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.firework",
+                "Crossbow of fireworks",
+                "Each rocket explodes on the target");
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -766,11 +771,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.firework",
-                "Crossbow of fireworks",
-                "Each rocket explodes on the target");
         shootLoadedCrossbows(
                 context,
                 server,
@@ -787,6 +787,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordTrident(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.trident",
+                "Trident: five throws",
+                "The ten-tick wind-up is gone");
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -804,11 +809,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(6);
-        openStage(
-                context,
-                "showcase.trident",
-                "Trident: five throws",
-                "The ten-tick wind-up is gone");
         shootLoadedCrossbows(
                 context,
                 server,
@@ -870,7 +870,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             context.waitTicks(settleTicks);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             ClientGameTestRecorder.showStep(
-                    context, stepId, stepTitle, "shot " + shot + ", health " + health);
+                    context, stepId, stepTitle, "shot " + shot + ", health " + health(health));
             ClientGameTestRecorder.log(context, "shot " + shot + "  target health " + health);
             if (health >= previous) {
                 throw new AssertionError(
@@ -922,7 +922,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             float drop = previous - health;
             if (filmed) {
                 ClientGameTestRecorder.showStep(
-                        context, stepId, stepTitle, "shot " + shot + ", health " + health);
+                        context, stepId, stepTitle, "shot " + shot + ", health " + health(health));
             }
             ClientGameTestRecorder.log(context, "shot " + shot + "  target health " + health);
             if (accelerated) {
@@ -966,6 +966,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordDamageEffects(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.effects-damage",
+                "Fire, lava, poison, wither",
+                "Every effect ticks ten times faster");
         standAt(context, server, playerId, 0.5, -2.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
@@ -1030,7 +1035,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server.computeOnServer(
                         current ->
                                 healthLine(current, targets, "Fire", "Lava", "Poison", "Wither"));
-        openStage(context, "showcase.effects-damage", "Fire, lava, poison, wither", starting);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.effects-damage", "Fire, lava, poison, wither", starting);
         for (int reading = 0; reading < 3; reading++) {
             context.waitTicks(READING_TICKS);
             String label =
@@ -1049,6 +1055,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordFreezingAndContact(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.effects-contact",
+                "Freezing, cactus, drying",
+                "Powder snow, contact damage, a fish on land");
         standAt(context, server, playerId, 0.5, -18.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
@@ -1090,7 +1101,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         String starting =
                 server.computeOnServer(
                         current -> healthLine(current, targets, "Freezing", "Cactus", "Drying"));
-        openStage(context, "showcase.effects-contact", "Freezing, cactus, drying", starting);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.effects-contact", "Freezing, cactus, drying", starting);
         for (int reading = 0; reading < 3; reading++) {
             context.waitTicks(READING_TICKS);
             String label =
@@ -1108,6 +1120,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordHungerCloudAndHealing(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.effects-hunger",
+                "Hunger, a cloud, and healing",
+                "Starvation, a lingering cloud, self-healing");
         standAt(context, server, playerId, 0.5, -34.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
@@ -1166,7 +1183,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server.computeOnServer(
                         current ->
                                 healthLine(current, targets, "Starving", "Regenerating", "Cloud"));
-        openStage(context, "showcase.effects-hunger", "Hunger, a cloud, and healing", starting);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.effects-hunger", "Hunger, a cloud, and healing", starting);
         float startingHealth =
                 server.computeOnServer(current -> living(current, targets.get(1)).getHealth());
         for (int reading = 0; reading < 3; reading++) {
@@ -1202,6 +1220,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// comparison is what shows "ten times faster".
     private static void recordEffectsOff(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        openStage(
+                context,
+                "showcase.effects-off",
+                "The same effects, rule off",
+                "Vanilla: barely a scratch in two seconds");
         standAt(context, server, playerId, 0.5, -2.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
@@ -1247,7 +1270,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server.computeOnServer(
                         current ->
                                 healthLine(current, targets, "FireOff", "PoisonOff", "WitherOff"));
-        openStage(context, "showcase.effects-off", "The same effects, rule off", starting);
+        ClientGameTestRecorder.showStep(
+                context, "showcase.effects-off", "The same effects, rule off", starting);
         float[] start =
                 server.computeOnServer(
                         current ->
@@ -1453,7 +1477,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             float drop = previous - health;
             ClientGameTestRecorder.showStep(
-                    context, "showcase.negatives", title, "shot " + shot + ", health " + health);
+                    context,
+                    "showcase.negatives",
+                    title,
+                    "shot " + shot + ", health " + health(health));
             ClientGameTestRecorder.log(
                     context, "rule off shot " + shot + "  target health " + health);
             if (shot == 1) {
@@ -1701,6 +1728,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.getInventory().clearContent();
         player.getInventory().setSelectedSlot(0);
         player.getInventory().setItem(0, new ItemStack(Items.WOODEN_SWORD));
+    }
+
+    /// One decimal for every health figure the caption prints, so a rocket's fractional damage
+    /// reads like the other stages' numbers.
+    private static String health(float value) {
+        return String.format(java.util.Locale.ROOT, "%.1f", value);
     }
 
     private static Vec3 chest(TestDedicatedServerContext server, int entityId) {
