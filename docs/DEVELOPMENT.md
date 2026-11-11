@@ -11,7 +11,7 @@ heavy status
 heavy --mem 6G --label accelerateddamage-tests -- ./gradlew --no-daemon --no-parallel --max-workers=2 build runAllGameTests --continue
 ```
 
-`runAllGameTests` includes Fabric and NeoForge server GameTests and the Fabric client GameTest. Shared server scenarios live in `common/src/gametest` and are registered by each loader. Client scenarios connect a vanilla client to a dedicated modded server and use keyboard input for melee and projectile attacks.
+`runAllGameTests` includes Fabric and NeoForge server GameTests and the Fabric client GameTest. Shared server scenarios live in `common/src/gametest` and are registered by each loader. Client scenarios connect a vanilla client to a dedicated modded server, spawn player-shaped targets and act only through `ClientGameTestPlayerActions`: the player turns to the target, walks into vanilla reach and presses the real attack or use key, and the shared guard fails the test if the crosshair is not on the target, the target is out of reach, or an interaction-range attribute was changed.
 
 ## Client recordings
 
@@ -22,4 +22,4 @@ heavy status
 GTR_RECORDING_PROFILE=showcase heavy --mem 6G --label accelerateddamage-recording -- ./gradlew --no-daemon :fabric:recordClientGameTest
 ```
 
-Recordings and their JSON metadata are written to `build/recordings`. The showcase covers vanilla damage immunity, rapid melee attacks, accelerated environmental effects, healing and drying, and one-tick bow, crossbow and trident attacks.
+Recordings and their JSON metadata are written to `build/recordings`. The showcase covers rapid melee against a player target with its health printed after each hit, drowning, bow, crossbow, trident and crossbow firework rockets fired several times inside one cooldown window, and accelerated fire and poison; every stage is followed by the same actions with the rule off, where only the first hit of each window lands.
