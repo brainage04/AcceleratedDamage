@@ -1,6 +1,7 @@
 package io.github.brainage04.accelerateddamage;
 
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageKnockbackScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -59,5 +60,35 @@ public final class AcceleratedDamageGameTest {
     @GameTest(environment = "accelerateddamage:fire_and_freeze", maxTicks = 100)
     public void beaconAndConduitPulses(GameTestHelper context) {
         AcceleratedDamageTimerScenarios.beaconAndConduitPulses(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void everyHitKnocksBackWhileIFramesAreDisabled(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.everyHitKnocksBackWhileIFramesAreDisabled(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void fullyBlockedHitsNeverKnockBack(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.fullyBlockedHitsNeverKnockBack(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void crossbowFireworkRocketsKnockBackOnEveryHit(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.crossbowFireworkRocketsKnockBackOnEveryHit(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void multishotCrossbowsKnockBackOncePerProjectile(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.multishotCrossbowsKnockBackOncePerProjectile(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void windChargesDamageOnEveryHit(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.windChargesDamageOnEveryHit(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:knockback", maxTicks = 100)
+    public void snowballsKnockBackWithoutDamage(GameTestHelper context) {
+        AcceleratedDamageKnockbackScenarios.snowballsKnockBackWithoutDamage(context);
     }
 }

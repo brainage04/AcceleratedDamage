@@ -8,7 +8,7 @@ All rules are disabled by default.
 
 ### Damage invincibility
 
-Disables the repeated-damage invincibility window for every damage source.
+Disables the repeated-damage invincibility window for every damage source. Vanilla applies knockback, the hurt flash and the hurt sound only to a hit that takes the full-damage path, so with this rule every hit knocks its target back as well; a hit that a shield blocks completely still does not.
 
 Minecraft 26.3 separated this window from a new temporary invulnerability that, for a fixed time, rejects all damage except `/kill` and falling into the void. Neither `disable_i_frames` nor `faster_effect_ticking` changes it. Vanilla gives it to the horses and skeletons of a skeleton trap (60 ticks), and a mob that converts into another mob keeps what is left of it. In 26.2 those trap mobs used the damage invincibility window instead, so both rules applied to them.
 

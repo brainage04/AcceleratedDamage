@@ -1,0 +1,7 @@
+{
+  "environment": "accelerateddamage:knockback",
+  "structure": "minecraftmodconventions:empty",
+  "max_ticks": 100,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:snowballs_knock_back_without_damage"
+}

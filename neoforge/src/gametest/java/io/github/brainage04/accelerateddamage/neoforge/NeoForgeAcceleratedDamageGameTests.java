@@ -2,6 +2,7 @@ package io.github.brainage04.accelerateddamage.neoforge;
 
 import io.github.brainage04.accelerateddamage.AcceleratedDamage;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageKnockbackScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -38,6 +39,18 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageTimerScenarios::healingMeleeAndRamCooldowns);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("beacon_and_conduit_pulses"),
                 () -> AcceleratedDamageTimerScenarios::beaconAndConduitPulses);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("every_hit_knocks_back_while_i_frames_are_disabled"),
+                () -> AcceleratedDamageKnockbackScenarios::everyHitKnocksBackWhileIFramesAreDisabled);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("fully_blocked_hits_never_knock_back"),
+                () -> AcceleratedDamageKnockbackScenarios::fullyBlockedHitsNeverKnockBack);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("crossbow_firework_rockets_knock_back_on_every_hit"),
+                () -> AcceleratedDamageKnockbackScenarios::crossbowFireworkRocketsKnockBackOnEveryHit);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("multishot_crossbows_knock_back_once_per_projectile"),
+                () -> AcceleratedDamageKnockbackScenarios::multishotCrossbowsKnockBackOncePerProjectile);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("wind_charges_damage_on_every_hit"),
+                () -> AcceleratedDamageKnockbackScenarios::windChargesDamageOnEveryHit);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("snowballs_knock_back_without_damage"),
+                () -> AcceleratedDamageKnockbackScenarios::snowballsKnockBackWithoutDamage);
     }
 
     private static Identifier id(String path) {
