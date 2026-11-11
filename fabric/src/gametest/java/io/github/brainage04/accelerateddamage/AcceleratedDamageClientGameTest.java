@@ -88,6 +88,37 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static final int READING_TICKS = 14;
 
+    /// Where an off-stage dummy waits: far above the arena and outside every camera's view.
+    private static final Vec3 PARKING = new Vec3(0.5, 200.0, 0.5);
+
+    /// Every dummy is created before the client joins, so no join line can ever reach a filmed
+    /// frame.
+    private static final List<String> DUMMY_NAMES =
+            List.of(
+                    "MeleeDummy",
+                    "BowDummy",
+                    "CrossbowDummy",
+                    "FireworkDummy",
+                    "TridentDummy",
+                    "Fire",
+                    "Lava",
+                    "Poison",
+                    "Wither",
+                    "Freezing",
+                    "Cactus",
+                    "Starving",
+                    "Regenerating",
+                    "Cloud",
+                    "MeleeDummyOff",
+                    "BowDummyOff",
+                    "CrossbowDummyOff",
+                    "TridentDummyOff",
+                    "FireOff",
+                    "PoisonOff",
+                    "WitherOff");
+
+    private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
+
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
     private static boolean tickListenerRegistered;
 
@@ -117,10 +148,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server.computeOnServer(
                                         current -> {
                                             preparePlayer(current);
-                                            return current.getPlayerList()
-                                                    .getPlayers()
-                                                    .getFirst()
-                                                    .getId();
+                                            return recordingPlayerId(current);
                                         });
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
                         context.waitTicks(20);
@@ -144,6 +172,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordFreezingAndContact(context, server, playerId);
                         recordHungerCloudAndHealing(context, server, playerId);
                         recordEffectsOff(context, server, playerId);
+                        recordDrowningOff(context, server, playerId);
 
                         // The negative cases run inside the same world, so the recorder still sees
                         // them: the caption names the tail instead of leaving a stage that looks
@@ -155,7 +184,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.negatives",
                                 "Negative cases, rule off",
-                                "Every repeat hit is refused and the numbers stay put");
+                                "Every repeat hit is refused; health is shown after each");
                         context.waitTicks(20);
                         assertNegativeCases(context, server, playerId);
                         ClientGameTestStages.endStage("showcase.negatives");
@@ -295,15 +324,31 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         new BlockPos(x, ARENA_Y - 1, z), Blocks.SAND.defaultBlockState());
             }
         }
+
+        // Every dummy joins here, before the client connects: a join line that is broadcast while
+        // nobody is connected can never appear in a recorded frame.
+        for (String name : DUMMY_NAMES) {
+            createDummy(server, name);
+        }
         for (int[] spot : new int[][] {{9, -8}, {8, -5}, {10, -4}, {7, -7}}) {
             level.setBlockAndUpdate(
                     new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
         }
     }
 
+    /// The recorded client: every dummy carries a custom name, the real player does not.
+    private static int recordingPlayerId(MinecraftServer server) {
+        return server.getPlayerList().getPlayers().stream()
+                .filter(candidate -> candidate.getCustomName() == null)
+                .findFirst()
+                .orElseThrow(
+                        () -> new AssertionError("Expected the recorded player in the player list"))
+                .getId();
+    }
+
     /// Puts the joined player at the arena centre, healed and empty-handed.
     private static void preparePlayer(MinecraftServer server) {
-        ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
+        ServerPlayer player = player(server, recordingPlayerId(server));
         int playerId = player.getId();
         healPlayer(server, playerId);
         player.teleportTo(server.overworld(), 0.5, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
@@ -369,7 +414,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             giveSword(player);
                             player.teleportTo(
                                     level, 0.5, ARENA_Y, 1.5, Set.of(), 0.0F, 0.0F, false);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "MeleeDummy",
                                     new Vec3(0.5, ARENA_Y, 4.5),
@@ -394,7 +439,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.melee",
                 "Rapid melee: every hit lands");
         closeStage(context, "showcase.melee", 20);
-        server.runOnServer(current -> removeTarget(current, targetId));
+        server.runOnServer(current -> parkTarget(current, targetId));
     }
 
     /// Attacks the target with the real attack key until the shot budget runs out, prints its
@@ -421,7 +466,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 // vanilla entity reach.
                 ClientGameTestPlayerActions.walkTo(context, position, MELEE_DISTANCE);
             }
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
+            // Aim at the neck rather than the middle of the body: the name tag above the head then
+            // sits near the middle of the frame instead of under the caption panel.
+            ClientGameTestPlayerActions.lookAt(
+                    context, chest(server, targetId).add(0.0, 0.45, 0.0));
             ClientGameTestPlayerActions.attackEntity(context, targetId);
             context.waitTicks(5);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
@@ -532,6 +580,75 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         closeStage(context, "showcase.drowning", 4);
     }
 
+    /// The same two seconds under water with the rule off, filmed with its own numbers: vanilla
+    /// loses a bubble a second instead of the whole lung.
+    private static void recordDrowningOff(
+            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        server.runOnServer(
+                current -> {
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
+                    healPlayer(current, playerId);
+                    player(current, playerId)
+                            .teleportTo(
+                                    current.overworld(),
+                                    9.5,
+                                    ARENA_Y,
+                                    -6.5,
+                                    Set.of(),
+                                    0.0F,
+                                    0.0F,
+                                    false);
+                });
+        context.waitTicks(6);
+        openStage(
+                context,
+                "showcase.drowning-off",
+                "The same two seconds, vanilla",
+                "Air falls one tick a second, health holds");
+        ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
+        server.runOnServer(current -> healPlayer(current, playerId));
+        reportAir(
+                context,
+                server,
+                playerId,
+                "showcase.drowning-off",
+                "The same two seconds, vanilla",
+                "start");
+        context.waitTicks(10);
+        reportAir(
+                context,
+                server,
+                playerId,
+                "showcase.drowning-off",
+                "The same two seconds, vanilla",
+                "10 ticks");
+        context.waitTicks(10);
+        reportAir(
+                context,
+                server,
+                playerId,
+                "showcase.drowning-off",
+                "The same two seconds, vanilla",
+                "20 ticks");
+        context.waitTicks(10);
+        int[] slow =
+                reportAir(
+                        context,
+                        server,
+                        playerId,
+                        "showcase.drowning-off",
+                        "The same two seconds, vanilla",
+                        "30 ticks");
+        if (slow[0] < 200 || slow[1] != 20) {
+            throw new AssertionError(
+                    "Expected vanilla air to last, air was " + slow[0] + " and health " + slow[1]);
+        }
+        server.runOnServer(current -> healPlayer(current, playerId));
+        closeStage(context, "showcase.drowning-off", 4);
+    }
+
     private static int[] reportAir(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
@@ -563,7 +680,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             player.getInventory().setItem(0, new ItemStack(Items.BOW));
                             player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "BowDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -587,7 +704,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.bow",
                 "Bow: five arrows in one second");
         closeStage(context, "showcase.bow", 20);
-        server.runOnServer(current -> removeTarget(current, targetId));
+        server.runOnServer(current -> parkTarget(current, targetId));
     }
 
     /// Five crossbows loaded with one bolt each, so the five bolts take only the shots themselves:
@@ -604,7 +721,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                         .setItem(slot, loadedCrossbow(new ItemStack(Items.ARROW)));
                             }
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "CrossbowDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -628,7 +745,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.crossbow",
                 "Crossbow: five loaded crossbows");
         closeStage(context, "showcase.crossbow", 20);
-        server.runOnServer(current -> removeTarget(current, targetId));
+        server.runOnServer(current -> parkTarget(current, targetId));
     }
 
     /// A crossbow of firework rockets, fired at a target eight blocks away so the blast reaches the
@@ -642,12 +759,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         current -> {
                             prepareShooter(current, playerId, true);
                             ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 2; slot++) {
+                            for (int slot = 0; slot < 4; slot++) {
                                 player.getInventory()
                                         .setItem(slot, loadedCrossbow(fireworkRocket()));
                             }
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "FireworkDummy",
                                     new Vec3(RANGE_X, ARENA_Y, FIREWORK_RANGE_Z),
@@ -665,13 +782,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server,
                 playerId,
                 targetId,
-                2,
+                4,
                 14,
                 false,
                 "showcase.firework",
                 "Crossbow of fireworks");
         closeStage(context, "showcase.firework", 24);
-        server.runOnServer(current -> removeTarget(current, targetId));
+        server.runOnServer(current -> parkTarget(current, targetId));
     }
 
     private static void recordTrident(
@@ -685,7 +802,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
                             }
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "TridentDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -709,7 +826,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.trident",
                 "Trident: five throws");
         closeStage(context, "showcase.trident", 20);
-        server.runOnServer(current -> removeTarget(current, targetId));
+        server.runOnServer(current -> parkTarget(current, targetId));
     }
 
     private static void prepareShooter(
@@ -872,28 +989,28 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             plainCell(level, 1, -8);
                             lavaCell(level, -2, -8);
                             int fire =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Fire",
                                             new Vec3(-4.5, ARENA_Y, -7.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int lava =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Lava",
                                             new Vec3(-1.5, ARENA_Y, -7.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int poison =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Poison",
                                             new Vec3(1.5, ARENA_Y, -7.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int wither =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Wither",
                                             new Vec3(4.5, ARENA_Y, -7.5),
@@ -914,11 +1031,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -7.5));
-        openStage(
-                context,
-                "showcase.effects-damage",
-                "Fire, lava, poison, wither",
-                "Every effect ticks ten times faster");
+        // The numbers are on screen from the stage's first frame, not only after the first reading.
+        String starting =
+                server.computeOnServer(
+                        current ->
+                                healthLine(current, targets, "Fire", "Lava", "Poison", "Wither"));
+        openStage(context, "showcase.effects-damage", "Fire, lava, poison, wither", starting);
         for (int reading = 0; reading < 3; reading++) {
             context.waitTicks(READING_TICKS);
             String label =
@@ -932,7 +1050,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         assertHealthFell(server, targets, EFFECT_TARGET_HEALTH, "fire, lava, poison and wither");
         closeStage(context, "showcase.effects-damage", 10);
-        server.runOnServer(current -> targets.forEach(target -> removeTarget(current, target)));
+        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
     }
 
     private static void recordFreezingAndContact(
@@ -946,14 +1064,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             cactusCell(level, 0, -24);
                             plainCell(level, 4, -24);
                             int freezing =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Freezing",
                                             new Vec3(-3.5, ARENA_Y, -23.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int cactus =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Cactus",
                                             new Vec3(0.85, ARENA_Y, -23.5),
@@ -974,11 +1092,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -23.5));
-        openStage(
-                context,
-                "showcase.effects-contact",
-                "Freezing, cactus, drying",
-                "Powder snow, contact damage, a fish on land");
+        // The numbers are on screen from the stage's first frame, not only after the first reading.
+        String starting =
+                server.computeOnServer(
+                        current -> healthLine(current, targets, "Freezing", "Cactus", "Drying"));
+        openStage(context, "showcase.effects-contact", "Freezing, cactus, drying", starting);
         for (int reading = 0; reading < 3; reading++) {
             context.waitTicks(READING_TICKS);
             String label =
@@ -991,7 +1109,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         assertHealthFell(server, targets, EFFECT_TARGET_HEALTH, "freezing, cactus and drying");
         closeStage(context, "showcase.effects-contact", 10);
-        server.runOnServer(current -> targets.forEach(target -> removeTarget(current, target)));
+        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
     }
 
     private static void recordHungerCloudAndHealing(
@@ -1005,21 +1123,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             plainCell(level, 0, -40);
                             plainCell(level, 4, -40);
                             int starving =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Starving",
                                             new Vec3(-3.5, ARENA_Y, -39.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int regenerating =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Regenerating",
                                             new Vec3(0.5, ARENA_Y, -39.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int clouded =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "Cloud",
                                             new Vec3(4.5, ARENA_Y, -39.5),
@@ -1049,11 +1167,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -39.5));
-        openStage(
-                context,
-                "showcase.effects-hunger",
-                "Hunger, a cloud, and healing",
-                "Starvation, a lingering cloud, self-healing");
+        // The numbers are on screen from the stage's first frame, not only after the first reading.
+        String starting =
+                server.computeOnServer(
+                        current ->
+                                healthLine(current, targets, "Starving", "Regenerating", "Cloud"));
+        openStage(context, "showcase.effects-hunger", "Hunger, a cloud, and healing", starting);
         float startingHealth =
                 server.computeOnServer(current -> living(current, targets.get(1)).getHealth());
         for (int reading = 0; reading < 3; reading++) {
@@ -1082,7 +1201,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + healing);
         }
         closeStage(context, "showcase.effects-hunger", 10);
-        server.runOnServer(current -> targets.forEach(target -> removeTarget(current, target)));
+        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
     }
 
     /// The same three damage effects with the rule off, filmed because the numbers barely move: the
@@ -1100,21 +1219,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             plainCell(level, -2, -8);
                             plainCell(level, 1, -8);
                             int fire =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "FireOff",
                                             new Vec3(-4.5, ARENA_Y, -7.5),
                                             COMPARISON_TARGET_HEALTH,
                                             true);
                             int poison =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "PoisonOff",
                                             new Vec3(-1.5, ARENA_Y, -7.5),
                                             COMPARISON_TARGET_HEALTH,
                                             true);
                             int wither =
-                                    spawnTarget(
+                                    placeTarget(
                                             current,
                                             "WitherOff",
                                             new Vec3(1.5, ARENA_Y, -7.5),
@@ -1129,11 +1248,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestPlayerActions.lookAt(context, new Vec3(-1.5, ARENA_Y + 0.9, -7.5));
-        openStage(
-                context,
-                "showcase.effects-off",
-                "The same effects, rule off",
-                "Vanilla: barely a scratch in two seconds");
+        // The numbers are on screen from the stage's first frame, not only after the first reading.
+        String starting =
+                server.computeOnServer(
+                        current ->
+                                healthLine(current, targets, "FireOff", "PoisonOff", "WitherOff"));
+        openStage(context, "showcase.effects-off", "The same effects, rule off", starting);
         float[] start =
                 server.computeOnServer(
                         current ->
@@ -1173,7 +1293,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
         closeStage(context, "showcase.effects-off", 10);
-        server.runOnServer(current -> targets.forEach(target -> removeTarget(current, target)));
+        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
     }
 
     /// The negative cases the owner asked for, run after the film ends: every positive stage above
@@ -1192,7 +1312,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             giveSword(player);
                             player.teleportTo(
                                     level, 0.5, ARENA_Y, 1.5, Set.of(), 0.0F, 0.0F, false);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "MeleeDummyOff",
                                     new Vec3(0.5, ARENA_Y, 4.5),
@@ -1209,10 +1329,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 2,
                 false,
                 false,
-                false,
-                "showcase.melee-off",
-                "The same hits, rule off");
-        server.runOnServer(current -> removeTarget(current, meleeTarget));
+                true,
+                "showcase.negatives",
+                "Melee: the same hits, rule off");
+        server.runOnServer(current -> parkTarget(current, meleeTarget));
 
         int bowTarget =
                 server.computeOnServer(
@@ -1222,7 +1342,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             player.getInventory().setItem(0, new ItemStack(Items.BOW));
                             player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "BowDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -1238,10 +1358,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 bowTarget,
                 2,
                 false,
-                false,
-                "showcase.bow-off",
-                "The same shots, rule off");
-        server.runOnServer(current -> removeTarget(current, bowTarget));
+                true,
+                "showcase.negatives",
+                "Bow: the same arrows, rule off");
+        server.runOnServer(current -> parkTarget(current, bowTarget));
 
         int crossbowTarget =
                 server.computeOnServer(
@@ -1253,7 +1373,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                         .setItem(slot, loadedCrossbow(new ItemStack(Items.ARROW)));
                             }
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "CrossbowDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -1262,8 +1382,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
-        shootLoadedCrossbowsVanilla(context, server, playerId, crossbowTarget, 2, false);
-        server.runOnServer(current -> removeTarget(current, crossbowTarget));
+        shootLoadedCrossbowsVanilla(
+                context,
+                server,
+                playerId,
+                crossbowTarget,
+                2,
+                false,
+                "Crossbow: the same bolts, rule off");
+        server.runOnServer(current -> parkTarget(current, crossbowTarget));
 
         int tridentTarget =
                 server.computeOnServer(
@@ -1274,7 +1401,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
                             }
                             player.getInventory().setSelectedSlot(0);
-                            return spawnTarget(
+                            return placeTarget(
                                     current,
                                     "TridentDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
@@ -1283,66 +1410,32 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         context.waitTicks(4);
         ClientGameTestCommands.clearChat(context);
-        shootLoadedCrossbowsVanilla(context, server, playerId, tridentTarget, 2, true);
-        server.runOnServer(current -> removeTarget(current, tridentTarget));
+        shootLoadedCrossbowsVanilla(
+                context,
+                server,
+                playerId,
+                tridentTarget,
+                2,
+                true,
+                "Trident: the same throws, rule off");
+        server.runOnServer(current -> parkTarget(current, tridentTarget));
 
-        assertVanillaDrowningSlow(context, server, playerId);
         assertVanillaEffectsSlow(context, server);
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
     }
 
-    /// The drowning negative: the same two seconds in the water with the rule off leaves the air
-    /// (and the health) almost untouched.
-    private static void assertVanillaDrowningSlow(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        server.runOnServer(
-                current -> {
-                    current.overworld()
-                            .getGameRules()
-                            .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
-                    ServerPlayer player = player(current, playerId);
-                    player.teleportTo(
-                            current.overworld(), 9.5, ARENA_Y, -6.5, Set.of(), 0.0F, 30.0F, false);
-                    player.setAirSupply(player.getMaxAirSupply());
-                    player.setHealth(player.getMaxHealth());
-                });
-        context.waitTicks(40);
-        int[] vanillaAir =
-                server.computeOnServer(
-                        current -> {
-                            ServerPlayer player = player(current, playerId);
-                            return new int[] {
-                                player.getAirSupply(), Math.round(player.getHealth())
-                            };
-                        });
-        server.runOnServer(
-                current ->
-                        player(current, playerId)
-                                .setAirSupply(player(current, playerId).getMaxAirSupply()));
-        if (vanillaAir[0] < 200 || vanillaAir[1] != 20) {
-            throw new AssertionError(
-                    "Expected vanilla air to last, air was "
-                            + vanillaAir[0]
-                            + " and health "
-                            + vanillaAir[1]);
-        }
-        ClientGameTestRecorder.log(
-                context, "rule off drowning: air " + vanillaAir[0] + ", health " + vanillaAir[1]);
-    }
-
     /// Two shots with the rule off: the first lands, and the second lands at most what the first
-    /// did, never in full.
+    /// did, never in full. Aimed once, so both shots fall inside one vanilla window.
     private static void shootLoadedCrossbowsVanilla(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
             int targetId,
             int shots,
-            boolean holdUse) {
+            boolean holdUse,
+            String title) {
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
         float firstDrop = 0.0F;
-        // One aim and one selection for the whole stage: both shots then fall inside one vanilla
-        // window.
         ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         for (int shot = 1; shot <= shots; shot++) {
@@ -1357,6 +1450,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             context.waitTicks(4);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             float drop = previous - health;
+            ClientGameTestRecorder.showStep(
+                    context, "showcase.negatives", title, "shot " + shot + ", health " + health);
             ClientGameTestRecorder.log(
                     context, "rule off shot " + shot + "  target health " + health);
             if (shot == 1) {
@@ -1409,7 +1504,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float health = server.computeOnServer(current -> living(current, target).getHealth());
         server.runOnServer(
                 current -> {
-                    removeTarget(current, target);
+                    parkTarget(current, target);
                     restoreRules(current);
                 });
         if (health < 17.0F) {
@@ -1638,9 +1733,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Connects a player-shaped, survival target the way a vanilla GameTest does, so the vanilla
     /// client renders it as a player the mod's damage applies to. A weapon target keeps enough
     /// health to outlive its stage; its food level sits below the regeneration threshold and above
-    /// starvation, so its health only changes when something hits it.
-    private static int spawnTarget(
-            MinecraftServer server, String name, Vec3 position, float health, boolean pinned) {
+    /// starvation, so its health only changes when something hits it. Creates a dummy once, parked
+    /// high above the arena, and remembers its id.
+    private static void createDummy(MinecraftServer server, String name) {
         ServerLevel level = server.overworld();
         CommonListenerCookie cookie =
                 CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), name), false);
@@ -1650,29 +1745,77 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         new EmbeddedChannel(connection);
         server.getPlayerList().placeNewPlayer(connection, target, cookie);
         // ServerPlayer#isInvulnerableTo rejects every damage source until the client acknowledges
-        // the world load, which
-        // a real client does with this packet after its 60-tick load timer; the fake client is
-        // already loaded.
+        // the world load, which a real client does with this packet after its 60-tick load timer;
+        // the fake client is already loaded.
         target.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
         target.setGameMode(GameType.SURVIVAL);
-        target.teleportTo(level, position.x, position.y, position.z, Set.of(), 180.0F, 0.0F, false);
-        target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(health);
-        target.setHealth(health);
+        target.teleportTo(level, PARKING.x, PARKING.y, PARKING.z, Set.of(), 180.0F, 0.0F, false);
+        target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(EFFECT_TARGET_HEALTH);
+        target.setHealth(EFFECT_TARGET_HEALTH);
         target.getFoodData().setFoodLevel(17);
         target.getFoodData().setSaturation(0.0F);
         target.setCustomName(Component.literal(name));
         target.setCustomNameVisible(true);
+        DUMMIES.put(name, target.getId());
+        TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, PARKING));
+    }
+
+    /// Moves a pre-created dummy to its stage position with a fresh health pool, and pins it there
+    /// when the stage must not let knockback move it.
+    private static int placeTarget(
+            MinecraftServer server, String name, Vec3 position, float health, boolean pinned) {
+        Integer id = DUMMIES.get(name);
+        if (id == null) {
+            throw new AssertionError("Expected the dummy " + name + " to exist");
+        }
+        ServerPlayer target = player(server, id);
+        target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(health);
+        target.setHealth(health);
+        target.getFoodData().setFoodLevel(17);
+        target.getFoodData().setSaturation(0.0F);
+        target.setRemainingFireTicks(0);
+        target.setTicksFrozen(0);
+        target.removeAllEffects();
+        target.teleportTo(
+                server.overworld(),
+                position.x,
+                position.y,
+                position.z,
+                Set.of(),
+                180.0F,
+                0.0F,
+                false);
         TRACKED.put(
                 target.getUUID(),
                 new TrackedTarget(target.getUUID(), name, pinned ? position : null));
-        return target.getId();
+        return id;
     }
 
-    private static void removeTarget(MinecraftServer server, int entityId) {
+    /// Sends a dummy back to the parking spot so the next stage's shot is clean; a mob is
+    /// discarded.
+    private static void parkTarget(MinecraftServer server, int entityId) {
         Entity target = server.overworld().getEntity(entityId);
         if (target instanceof ServerPlayer player) {
-            TRACKED.remove(player.getUUID());
-            server.getPlayerList().remove(player);
+            String name =
+                    DUMMY_NAMES.stream()
+                            .filter(
+                                    candidate ->
+                                            DUMMIES.get(candidate) != null
+                                                    && DUMMIES.get(candidate) == entityId)
+                            .findFirst()
+                            .orElse("");
+            player.removeAllEffects();
+            player.setHealth(player.getMaxHealth());
+            player.teleportTo(
+                    server.overworld(),
+                    PARKING.x,
+                    PARKING.y,
+                    PARKING.z,
+                    Set.of(),
+                    180.0F,
+                    0.0F,
+                    false);
+            TRACKED.put(player.getUUID(), new TrackedTarget(player.getUUID(), name, PARKING));
         } else if (target != null) {
             target.discard();
         }
