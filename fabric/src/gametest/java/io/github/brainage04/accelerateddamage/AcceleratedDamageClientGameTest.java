@@ -558,7 +558,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, true);
                             ServerPlayer player = player(current, playerId);
                             player.getInventory().setItem(0, new ItemStack(Items.BOW));
                             player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
@@ -597,7 +597,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, true);
                             ServerPlayer player = player(current, playerId);
                             for (int slot = 0; slot < 5; slot++) {
                                 player.getInventory()
@@ -640,7 +640,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, true);
                             ServerPlayer player = player(current, playerId);
                             for (int slot = 0; slot < 2; slot++) {
                                 player.getInventory()
@@ -679,7 +679,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, true);
                             ServerPlayer player = player(current, playerId);
                             for (int slot = 0; slot < 5; slot++) {
                                 player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
@@ -712,10 +712,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         server.runOnServer(current -> removeTarget(current, targetId));
     }
 
-    private static void prepareShooter(MinecraftServer server, int playerId) {
+    private static void prepareShooter(
+            MinecraftServer server, int playerId, boolean disableIFrames) {
         GameRules rules = server.overworld().getGameRules();
         rules.set(ModGameRules.INSTANT_SHOOT, true, server);
-        rules.set(ModGameRules.DISABLE_IFRAMES, true, server);
+        rules.set(ModGameRules.DISABLE_IFRAMES, disableIFrames, server);
         ServerPlayer player = player(server, playerId);
         // The ranged lane runs beside the melee wall, so a rocket that overshoots explodes in open
         // air.
@@ -1194,6 +1195,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
+        ClientGameTestCommands.clearChat(context);
         strikeRepeatedly(
                 context,
                 server,
@@ -1210,7 +1212,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int bowTarget =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, false);
                             ServerPlayer player = player(current, playerId);
                             player.getInventory().setItem(0, new ItemStack(Items.BOW));
                             player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
@@ -1223,6 +1225,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
+        ClientGameTestCommands.clearChat(context);
         shootRepeatedly(
                 context,
                 server,
@@ -1238,7 +1241,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int crossbowTarget =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, false);
                             ServerPlayer player = player(current, playerId);
                             for (int slot = 0; slot < 2; slot++) {
                                 player.getInventory()
@@ -1253,13 +1256,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
+        ClientGameTestCommands.clearChat(context);
         shootLoadedCrossbowsVanilla(context, server, playerId, crossbowTarget, 2, false);
         server.runOnServer(current -> removeTarget(current, crossbowTarget));
 
         int tridentTarget =
                 server.computeOnServer(
                         current -> {
-                            prepareShooter(current, playerId);
+                            prepareShooter(current, playerId, false);
                             ServerPlayer player = player(current, playerId);
                             for (int slot = 0; slot < 2; slot++) {
                                 player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
@@ -1273,6 +1277,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     true);
                         });
         context.waitTicks(4);
+        ClientGameTestCommands.clearChat(context);
         shootLoadedCrossbowsVanilla(context, server, playerId, tridentTarget, 2, true);
         server.runOnServer(current -> removeTarget(current, tridentTarget));
 
@@ -1389,7 +1394,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             living.addEffect(new MobEffectInstance(MobEffects.POISON, 400, 2));
                             return slow;
                         });
-        context.waitTicks(20);
+        // Two ticks for the join line, then the same twenty ticks of vanilla ticking the health
+        // check
+        // expects: a longer window lets the fire reach its 20-tick damage tick.
+        context.waitTicks(2);
+        ClientGameTestCommands.clearChat(context);
+        context.waitTicks(18);
         float health = server.computeOnServer(current -> living(current, target).getHealth());
         server.runOnServer(
                 current -> {
