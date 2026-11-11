@@ -722,12 +722,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         for (int shot = 1; shot <= shots; shot++) {
             ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            ClientGameTestPlayerActions.requireLookingAtEntity(context, targetId);
+            // A shot is aimed, not attacked: the client picks an entity only inside
+            // Player.DEFAULT_ENTITY_INTERACTION_RANGE (three blocks), and a ranged target stands
+            // four or more blocks
+            // out, so the crosshair guard cannot pass there. The interaction-range guard and the
+            // real use key still
+            // prove the shot is one a player could take.
             int hotbarSlot = shot - 1;
             context.getInput().pressKey(options -> options.keyHotbarSlots[hotbarSlot]);
             context.waitTicks(2);
             ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            ClientGameTestPlayerActions.requireLookingAtEntity(context, targetId);
             if (holdUse) {
                 context.getInput().holdKeyFor(options -> options.keyUse, 1);
             } else {
@@ -1307,12 +1311,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
         for (int shot = 1; shot <= shots; shot++) {
             ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            ClientGameTestPlayerActions.requireLookingAtEntity(context, targetId);
             int hotbarSlot = shot - 1;
             context.getInput().pressKey(options -> options.keyHotbarSlots[hotbarSlot]);
             context.waitTicks(2);
             ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            ClientGameTestPlayerActions.requireLookingAtEntity(context, targetId);
             if (holdUse) {
                 context.getInput().holdKeyFor(options -> options.keyUse, 1);
             } else {
