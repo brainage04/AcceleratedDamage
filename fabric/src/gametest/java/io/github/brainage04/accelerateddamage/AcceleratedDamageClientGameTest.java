@@ -550,7 +550,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "BowDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(6);
         openStage(
@@ -591,7 +591,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "CrossbowDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(6);
         openStage(
@@ -634,7 +634,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "FireworkDummy",
                                     new Vec3(RANGE_X, ARENA_Y, FIREWORK_RANGE_Z),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(6);
         openStage(
@@ -672,7 +672,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "TridentDummy",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(6);
         openStage(
@@ -1193,7 +1193,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "BowDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(4);
         shootRepeatedly(
@@ -1223,7 +1223,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "CrossbowDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(4);
         shootLoadedCrossbowsVanilla(context, server, playerId, crossbowTarget, 2, false);
@@ -1243,7 +1243,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     "TridentDummyOff",
                                     new Vec3(RANGE_X, ARENA_Y, 4.5),
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    true);
                         });
         context.waitTicks(4);
         shootLoadedCrossbowsVanilla(context, server, playerId, tridentTarget, 2, true);
