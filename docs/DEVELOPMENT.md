@@ -29,6 +29,8 @@ Recordings and their JSON metadata are written to `build/recordings`. The showca
 - three rows of effects, one target per family: fire, lava, poison, wither; freezing, cactus, drying out; starvation, a lingering cloud and hunger-based regeneration;
 - the damage effects again with the rule off, where the numbers barely move over the same time.
 
-The negative cases (the rule-off weapon cases, the drowning baseline and the vanilla effect baseline) are the last stage of the same world and carry their own caption, so the recorder's final seconds read as a named comparison rather than a stage where nothing happens. The conventions' `withDedicatedServer` starts and stops the recording itself; the test never calls `startRecording` or `stopRecording`.
+The negative cases are their own stages, each with a caption and the target's health after every hit: the vanilla drowning comparison (air 300, 290, 280, 270 against the accelerated 300, 200, 100, 0), the rule-off weapon cases and the vanilla effect baseline. The conventions' `withDedicatedServer` starts and stops the recording itself; the test never calls `startRecording` or `stopRecording`.
+
+Every player-shaped dummy is created in the `beforeJoin` hook, while the client is not yet connected, so no join line can ever appear in a recorded frame; between stages a dummy waits far above the arena and its stage teleports it into the shot.
 
 A player-shaped target needs one extra call to tick: `ServerPlayer#tick` runs only the connection half of a player's tick, and the `Player`/`LivingEntity`/`Entity` half (fire, effects, freezing, air, hunger) runs from `doTick()`, which a real client's connection calls. The showcase registers `ServerTickEvents.START_SERVER_TICK` and calls `doTick()` on every showcase target, which is what makes effects tick on a fake player at all.

@@ -130,6 +130,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     public void runTest(ClientGameTestContext context) {
         registerTickListener();
         Properties serverProperties = ClientGameTestServers.flatServerProperties();
+        // Every dummy joins before the client does, and vanilla refuses a connection once the
+        // player
+        // list is full (twenty by default), which would lock the recorded client out.
+        serverProperties.setProperty("max-players", "40");
 
         // ClientGameTestServers.withDedicatedServer starts the recording before the world exists
         // and
