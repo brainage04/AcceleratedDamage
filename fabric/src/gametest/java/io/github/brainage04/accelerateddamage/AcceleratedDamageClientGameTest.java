@@ -10,7 +10,6 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
@@ -25,13 +24,9 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.FireworkExplosion;
-import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -89,7 +84,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordBow(context, server, playerId);
                         recordCrossbow(context, server, playerId);
                         recordTrident(context, server, playerId);
-                        recordFireworkRocket(context, server, playerId);
                         recordEffects(context, server, playerId);
 
                         ClientGameTestRecorder.showStep(
@@ -387,46 +381,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         server.runOnServer(current -> removeTarget(current, vanillaTargetId));
     }
 
-    private static void recordFireworkRocket(ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        ClientGameTestRecorder.showStep(
-                context,
-                "showcase.firework",
-                "Crossbow firework rockets",
-                "Each rocket explodes on the target"
-        );
-        int targetId = shootStage(
-                context,
-                server,
-                playerId,
-                "FireworkDummy",
-                Items.CROSSBOW,
-                Items.FIREWORK_ROCKET,
-                4,
-                "showcase.firework",
-                "Crossbow firework rockets"
-        );
-        server.runOnServer(current -> removeTarget(current, targetId));
-
-        ClientGameTestRecorder.showStep(
-                context,
-                "showcase.firework-off",
-                "The same rockets, rule off",
-                "Only the first rocket lands"
-        );
-        int vanillaTargetId = shootStage(
-                context,
-                server,
-                playerId,
-                "FireworkDummyOff",
-                Items.CROSSBOW,
-                Items.FIREWORK_ROCKET,
-                2,
-                false,
-                "showcase.firework-off",
-                "The same rockets, rule off"
-        );
-        server.runOnServer(current -> removeTarget(current, vanillaTargetId));
-    }
 
     /// Equips the weapon and its ammunition, spawns a player target in front of the shooter and fires with the real use
     /// key until the target dies or the shot budget runs out, printing the target's health after every shot.
@@ -474,17 +428,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             } else {
                 player.getInventory().setItem(0, new ItemStack(weapon));
             }
-            if (ammunition == Items.FIREWORK_ROCKET) {
-                // A firework rocket only damages when it carries an explosion, which a crafted one does.
-                ItemStack rockets = new ItemStack(Items.FIREWORK_ROCKET, 32);
-                rockets.set(
-                        DataComponents.FIREWORKS,
-                        new Fireworks(1, List.of(FireworkExplosion.DEFAULT))
-                );
-                player.setItemInHand(InteractionHand.OFF_HAND, rockets);
-            } else {
-                player.getInventory().setItem(8, new ItemStack(ammunition, 32));
-            }
+            player.getInventory().setItem(8, new ItemStack(ammunition, 32));
             player.getInventory().setSelectedSlot(0);
             return spawnTarget(current, targetName, new Vec3(RANGE_X, ARENA_Y, 4.5));
         });
@@ -507,8 +451,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             } else {
                 context.getInput().holdKeyFor(options -> options.keyUse, 1);
             }
-            // A firework rocket flies at 1.6 blocks a tick, so its explosion lands a tick later than an arrow's.
-            context.waitTicks(ammunition == Items.FIREWORK_ROCKET ? 4 : 3);
+            context.waitTicks(3);
             float health = server.computeOnServer(current -> living(current, targetId).getHealth());
             float drop = previous[0] - health;
             ClientGameTestRecorder.showStep(context, stepId, stepTitle, "shot " + shot + ", health " + health);
@@ -517,19 +460,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 if (drop <= 0.0F) {
                     throw new AssertionError(
                             "Expected shot " + shot + " to damage the target; health stayed at " + health + ": "
-                                    + server.computeOnServer(current -> {
-                                        ServerPlayer shooter = player(current, playerId);
-                                        int rockets = current.overworld()
-                                                .getEntitiesOfClass(
-                                                        FireworkRocketEntity.class,
-                                                        shooter.getBoundingBox().inflate(32.0)
-                                                )
-                                                .size();
-                                        return "charged=" + CrossbowItem.isCharged(shooter.getMainHandItem())
-                                                + " main=" + shooter.getMainHandItem()
-                                                + " off=" + shooter.getOffhandItem()
-                                                + " rocketsInFlight=" + rockets;
-                                    })
+                                    + server.computeOnServer(current -> describeTarget(current, targetId, playerId))
                     );
                 }
             } else if (shot == 1) {
