@@ -100,17 +100,23 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         registerTickListener();
         Properties serverProperties = ClientGameTestServers.flatServerProperties();
 
+        // ClientGameTestServers.withDedicatedServer starts the recording before the world exists
+        // and
+        // stops it after the world is gone, so this test never starts or stops it itself. The arena
+        // is
+        // built in its beforeJoin hook, so no frame shows the world being built.
         ClientGameTestServers.withDedicatedServer(
                 context,
                 serverProperties,
                 "Accelerated Damage complete showcase GameTest",
+                server -> server.runOnServer(AcceleratedDamageClientGameTest::buildArena),
                 server -> {
                     int playerId;
                     try {
                         playerId =
                                 server.computeOnServer(
                                         current -> {
-                                            prepareArena(current);
+                                            preparePlayer(current);
                                             return current.getPlayerList()
                                                     .getPlayers()
                                                     .getFirst()
@@ -119,15 +125,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
                         context.waitTicks(20);
                         // The title card covers the tour that loads every viewpoint, so the first
-                        // stage never opens on
-                        // an unloaded chunk.
+                        // stage never opens on an unloaded chunk.
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.ready",
                                 "Accelerated Damage",
                                 "Four rules, every hit and every effect");
                         preloadArena(context, server, playerId);
-                        ClientGameTestRecorder.startRecording(context);
                         context.waitTicks(10);
 
                         recordMelee(context, server, playerId);
@@ -141,14 +145,22 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordHungerCloudAndHealing(context, server, playerId);
                         recordEffectsOff(context, server, playerId);
 
-                        // The last targets left the world a moment ago; their leave lines must not
-                        // reach the last
-                        // frame.
+                        // The negative cases run inside the same world, so the recorder still sees
+                        // them: the caption names the tail instead of leaving a stage that looks
+                        // like
+                        // nothing happening.
+                        ClientGameTestCommands.clearChat(context);
+                        ClientGameTestStages.markStage("showcase.negatives");
+                        ClientGameTestRecorder.showStep(
+                                context,
+                                "showcase.negatives",
+                                "Negative cases, rule off",
+                                "Every repeat hit is refused and the numbers stay put");
+                        context.waitTicks(20);
+                        assertNegativeCases(context, server, playerId);
+                        ClientGameTestStages.endStage("showcase.negatives");
                         ClientGameTestCommands.clearChat(context);
                         context.waitTicks(4);
-                        ClientGameTestRecorder.stopRecording(context);
-
-                        assertNegativeCases(context, server, playerId);
                     } finally {
                         TRACKED.clear();
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
@@ -231,7 +243,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    private static void prepareArena(MinecraftServer server) {
+    /// Builds the whole showcase arena. It runs before the client joins, so the film starts on a
+    /// finished set.
+    private static void buildArena(MinecraftServer server) {
         ServerLevel level = server.overworld();
         restoreRules(server);
         // Every target is a player, and a server whose PvP game rule is off rejects all
@@ -285,10 +299,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             level.setBlockAndUpdate(
                     new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
         }
+    }
 
+    /// Puts the joined player at the arena centre, healed and empty-handed.
+    private static void preparePlayer(MinecraftServer server) {
         ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
-        player.teleportTo(level, 0.5, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
-        player.setHealth(player.getMaxHealth());
+        int playerId = player.getId();
+        healPlayer(server, playerId);
+        player.teleportTo(server.overworld(), 0.5, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
         player.getInventory().clearContent();
         player.setGameMode(GameType.SURVIVAL);
     }
