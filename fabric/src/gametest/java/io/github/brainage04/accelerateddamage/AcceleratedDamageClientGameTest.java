@@ -162,9 +162,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void preloadArena(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         double[][] viewpoints = {
-            {0.5, -3.5},
-            {0.5, -19.5},
-            {0.5, -35.5},
+            {0.5, -2.5},
+            {0.5, -18.5},
+            {0.5, -34.5},
             {9.5, -6.5},
             {RANGE_X, 0.5}
         };
@@ -275,11 +275,33 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
 
+        for (int x = 7; x <= 11; x++) {
+            for (int z = -9; z <= -4; z++) {
+                level.setBlockAndUpdate(
+                        new BlockPos(x, ARENA_Y - 1, z), Blocks.SAND.defaultBlockState());
+            }
+        }
+        for (int[] spot : new int[][] {{9, -8}, {8, -5}, {10, -4}, {7, -7}}) {
+            level.setBlockAndUpdate(
+                    new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
+        }
+
         ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
         player.teleportTo(level, 0.5, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
         player.setHealth(player.getMaxHealth());
         player.getInventory().clearContent();
         player.setGameMode(GameType.SURVIVAL);
+    }
+
+    /// Puts the recording player back to full health, full air and unlit, so a stage never starts
+    /// wounded, drowned or on fire. A death screen would cover every later stage.
+    private static void healPlayer(MinecraftServer server, int playerId) {
+        ServerPlayer player = player(server, playerId);
+        player.setHealth(player.getMaxHealth());
+        player.setAirSupply(player.getMaxAirSupply());
+        player.setRemainingFireTicks(0);
+        player.setTicksFrozen(0);
+        player.removeAllEffects();
     }
 
     /// Clears the chat lines the fake targets add when they join or leave, then opens the stage.
@@ -304,17 +326,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             double z,
             float yaw) {
         server.runOnServer(
-                current ->
-                        player(current, playerId)
-                                .teleportTo(
-                                        current.overworld(),
-                                        x,
-                                        ARENA_Y,
-                                        z,
-                                        Set.of(),
-                                        yaw,
-                                        0.0F,
-                                        false));
+                current -> {
+                    healPlayer(current, playerId);
+                    player(current, playerId)
+                            .teleportTo(
+                                    current.overworld(), x, ARENA_Y, z, Set.of(), yaw, 0.0F, false);
+                });
         context.waitTicks(6);
         ClientGameTestWaits.waitForChunkWindow(context, 4, 200);
         ClientGameTestWaits.waitForRenderSettled(context, 4, 200);
@@ -329,6 +346,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             GameRules rules = level.getGameRules();
                             rules.set(ModGameRules.DISABLE_IFRAMES, true, current);
                             rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, true, current);
+                            healPlayer(current, playerId);
                             ServerPlayer player = player(current, playerId);
                             giveSword(player);
                             player.teleportTo(
@@ -426,11 +444,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 current -> {
                     GameRules rules = current.overworld().getGameRules();
                     rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
-                    ServerPlayer player = player(current, playerId);
-                    player.teleportTo(
-                            current.overworld(), 9.5, ARENA_Y, -6.5, Set.of(), 0.0F, 30.0F, false);
-                    player.setAirSupply(player.getMaxAirSupply());
-                    player.setHealth(player.getMaxHealth());
+                    healPlayer(current, playerId);
+                    player(current, playerId)
+                            .teleportTo(
+                                    current.overworld(),
+                                    9.5,
+                                    ARENA_Y,
+                                    -6.5,
+                                    Set.of(),
+                                    0.0F,
+                                    0.0F,
+                                    false);
                 });
         context.waitTicks(6);
         openStage(
@@ -438,7 +462,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.drowning",
                 "Drowning in two seconds",
                 "Air empties ten times faster");
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y - 0.4, -6.5));
+        ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
+        // The camera and the title card cost ticks under water, so the reading starts from a full
+        // lung.
+        server.runOnServer(current -> healPlayer(current, playerId));
         reportAir(
                 context, server, playerId, "showcase.drowning", "Drowning in two seconds", "start");
         context.waitTicks(10);
@@ -457,7 +484,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.drowning",
                 "Drowning in two seconds",
                 "20 ticks");
-        context.waitTicks(20);
+        context.waitTicks(10);
+        reportAir(
+                context,
+                server,
+                playerId,
+                "showcase.drowning",
+                "Drowning in two seconds",
+                "air gone");
+        context.waitTicks(10);
         int[] drowned =
                 reportAir(
                         context,
@@ -465,7 +500,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         playerId,
                         "showcase.drowning",
                         "Drowning in two seconds",
-                        "40 ticks");
+                        "health falling");
         if (drowned[0] > 0 || drowned[1] >= 20) {
             throw new AssertionError(
                     "Expected the air to run out and drowning damage to start, air was "
@@ -473,11 +508,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + " and health "
                             + drowned[1]);
         }
-        closeStage(context, "showcase.drowning", 10);
-        server.runOnServer(
-                current ->
-                        player(current, playerId)
-                                .setAirSupply(player(current, playerId).getMaxAirSupply()));
+        // Out of the water before the next hit would kill: a death screen would cover every later
+        // stage.
+        server.runOnServer(current -> healPlayer(current, playerId));
+        closeStage(context, "showcase.drowning", 4);
     }
 
     private static int[] reportAir(
@@ -667,8 +701,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ServerPlayer player = player(server, playerId);
         // The ranged lane runs beside the melee wall, so a rocket that overshoots explodes in open
         // air.
+        healPlayer(server, playerId);
         player.teleportTo(server.overworld(), RANGE_X, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
-        player.setHealth(player.getMaxHealth());
         player.getInventory().clearContent();
     }
 
@@ -788,7 +822,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordDamageEffects(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        standAt(context, server, playerId, 0.5, -3.5, 180.0F);
+        standAt(context, server, playerId, 0.5, -2.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
                         current -> {
@@ -870,19 +904,19 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordFreezingAndContact(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        standAt(context, server, playerId, 0.5, -19.5, 180.0F);
+        standAt(context, server, playerId, 0.5, -18.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
                         current -> {
                             ServerLevel level = current.overworld();
-                            snowCell(level, -5, -24);
+                            snowCell(level, -4, -24);
                             cactusCell(level, 0, -24);
-                            plainCell(level, 5, -24);
+                            plainCell(level, 4, -24);
                             int freezing =
                                     spawnTarget(
                                             current,
                                             "Freezing",
-                                            new Vec3(-4.5, ARENA_Y, -23.5),
+                                            new Vec3(-3.5, ARENA_Y, -23.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int cactus =
@@ -897,7 +931,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                             current,
                                             EntityTypes.COD,
                                             "Drying",
-                                            new Vec3(5.5, ARENA_Y, -23.5));
+                                            new Vec3(4.5, ARENA_Y, -23.5));
                             living(current, drying)
                                     .getAttribute(Attributes.MAX_HEALTH)
                                     .setBaseValue(EFFECT_TARGET_HEALTH);
@@ -929,33 +963,33 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void recordHungerCloudAndHealing(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        standAt(context, server, playerId, 0.5, -35.5, 180.0F);
+        standAt(context, server, playerId, 0.5, -34.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
                         current -> {
                             ServerLevel level = current.overworld();
-                            plainCell(level, -5, -40);
-                            plainCell(level, 1, -40);
-                            plainCell(level, 5, -40);
+                            plainCell(level, -4, -40);
+                            plainCell(level, 0, -40);
+                            plainCell(level, 4, -40);
                             int starving =
                                     spawnTarget(
                                             current,
                                             "Starving",
-                                            new Vec3(-4.5, ARENA_Y, -39.5),
+                                            new Vec3(-3.5, ARENA_Y, -39.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int regenerating =
                                     spawnTarget(
                                             current,
                                             "Regenerating",
-                                            new Vec3(1.5, ARENA_Y, -39.5),
+                                            new Vec3(0.5, ARENA_Y, -39.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             int clouded =
                                     spawnTarget(
                                             current,
                                             "Cloud",
-                                            new Vec3(5.5, ARENA_Y, -39.5),
+                                            new Vec3(4.5, ARENA_Y, -39.5),
                                             EFFECT_TARGET_HEALTH,
                                             true);
                             ServerPlayer starvingPlayer = (ServerPlayer) living(current, starving);
@@ -967,7 +1001,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             regeneratingPlayer.getFoodData().setFoodLevel(20);
                             regeneratingPlayer.getFoodData().setSaturation(0.0F);
 
-                            AreaEffectCloud cloud = new AreaEffectCloud(level, 5.5, ARENA_Y, -39.5);
+                            AreaEffectCloud cloud = new AreaEffectCloud(level, 4.5, ARENA_Y, -39.5);
                             cloud.setPotionContents(
                                     new PotionContents(
                                             Optional.of(Potions.POISON),
@@ -1000,6 +1034,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     context, "showcase.effects-hunger", "Hunger, a cloud, and healing", label);
             ClientGameTestRecorder.log(context, label);
         }
+        assertHealthFell(
+                server,
+                List.of(targets.get(0), targets.get(2)),
+                EFFECT_TARGET_HEALTH,
+                "starvation and the lingering cloud");
         float healing =
                 server.computeOnServer(current -> living(current, targets.get(1)).getHealth());
         if (healing <= startingHealth) {
@@ -1017,7 +1056,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// comparison is what shows "ten times faster".
     private static void recordEffectsOff(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        standAt(context, server, playerId, 0.5, -3.5, 180.0F);
+        standAt(context, server, playerId, 0.5, -2.5, 180.0F);
         List<Integer> targets =
                 server.computeOnServer(
                         current -> {
@@ -1505,6 +1544,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 .append(target.getRemovalReason())
                 .append(" temporarilyInvulnerable=")
                 .append(target.isTemporarilyInvulnerable())
+                .append(" playerHealth=")
+                .append(player.getHealth())
+                .append(" playerDead=")
+                .append(player.isDeadOrDying())
+                .append(" playerAir=")
+                .append(player.getAirSupply())
                 .append(" pvpRule=")
                 .append(server.overworld().getGameRules().get(GameRules.PVP))
                 .append(" canHarmPlayer=")

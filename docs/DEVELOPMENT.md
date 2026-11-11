@@ -22,4 +22,13 @@ heavy status
 GTR_RECORDING_PROFILE=showcase heavy --mem 6G --label accelerateddamage-recording -- ./gradlew --no-daemon :fabric:recordClientGameTest
 ```
 
-Recordings and their JSON metadata are written to `build/recordings`. The showcase covers rapid melee against a player target with its health printed after each hit, drowning, bow, crossbow, trident and crossbow firework rockets fired several times inside one cooldown window, and accelerated fire and poison; every stage is followed by the same actions with the rule off, where only the first hit of each window lands.
+Recordings and their JSON metadata are written to `build/recordings`. The showcase films each rule against player-shaped targets, and every target's health is printed above its head and in the caption after each hit:
+
+- rapid melee, and drowning;
+- a bow, five crossbows that are loaded before the stage so the stage holds only the shots, a crossbow of firework rockets, and five tridents;
+- three rows of effects, one target per family: fire, lava, poison, wither; freezing, cactus, drying out; starvation, a lingering cloud and hunger-based regeneration;
+- the damage effects again with the rule off, where the numbers barely move over the same time.
+
+The rule-off weapon cases (melee, bow, crossbow, trident), the drowning baseline and the vanilla effect baseline run after the film ends, so they assert the negative cases without leaving a stage that shows nothing.
+
+A player-shaped target needs one extra call to tick: `ServerPlayer#tick` runs only the connection half of a player's tick, and the `Player`/`LivingEntity`/`Entity` half (fire, effects, freezing, air, hunger) runs from `doTick()`, which a real client's connection calls. The showcase registers `ServerTickEvents.START_SERVER_TICK` and calls `doTick()` on every showcase target, which is what makes effects tick on a fake player at all.
