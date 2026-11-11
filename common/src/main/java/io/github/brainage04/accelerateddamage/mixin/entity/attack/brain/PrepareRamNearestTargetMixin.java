@@ -26,7 +26,7 @@ public abstract class PrepareRamNearestTargetMixin {
                             target =
                                     "Lnet/minecraft/world/entity/ai/behavior/PrepareRamNearestTarget;ramPrepareTime:I",
                             opcode = Opcodes.GETFIELD))
-    private int acceleratedDamage$shortenRamWindUp(PrepareRamNearestTarget self) {
+    private int acceleratedDamage$shortenRamWindUp(PrepareRamNearestTarget<?> self) {
         return VirtualTime.isEnabled()
                 ? (ramPrepareTime + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION
                 : ramPrepareTime;

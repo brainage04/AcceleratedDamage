@@ -131,7 +131,7 @@ public final class AcceleratedDamageKnockbackScenarios {
         ServerLevel level = context.getLevel();
         MinecraftServer server = level.getServer();
         GameRules rules = level.getGameRules();
-        ServerPlayer shooter = context.makeMockServerPlayerInLevel();
+        ServerPlayer shooter = MockPlayers.spawn(context);
 
         try {
             setRules(rules, server, true, false, false, false);
@@ -178,7 +178,7 @@ public final class AcceleratedDamageKnockbackScenarios {
         ServerLevel level = context.getLevel();
         MinecraftServer server = level.getServer();
         GameRules rules = level.getGameRules();
-        ServerPlayer shooter = context.makeMockServerPlayerInLevel();
+        ServerPlayer shooter = MockPlayers.spawn(context);
 
         try {
             setRules(rules, server, true, false, false, false);

@@ -28,7 +28,7 @@ public abstract class CrossbowAttackMixin {
                             opcode = Opcodes.PUTFIELD,
                             ordinal = 1))
     private void acceleratedDamage$countDownAttackDelayFaster(
-            CrossbowAttack self, int vanillaValue) {
+            CrossbowAttack<?, ?> self, int vanillaValue) {
         if (!VirtualTime.isEnabled()) {
             attackDelay = vanillaValue;
             return;

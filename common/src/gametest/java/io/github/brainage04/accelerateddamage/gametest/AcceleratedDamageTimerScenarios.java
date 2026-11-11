@@ -85,7 +85,7 @@ public final class AcceleratedDamageTimerScenarios {
     public static void hungerAndStingingAndCreeperFuses(GameTestHelper context) {
         ServerLevel level = context.getLevel();
         boolean previous = level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
-        ServerPlayer player = context.makeMockServerPlayerInLevel();
+        ServerPlayer player = MockPlayers.spawn(context);
         try {
             player.setGameMode(GameType.SURVIVAL);
             for (boolean enabled : new boolean[] {false, true}) {
@@ -240,7 +240,7 @@ public final class AcceleratedDamageTimerScenarios {
         boolean previous = level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
         BlockPos center = context.absolutePos(new BlockPos(3, 3, 3));
         Map<BlockPos, BlockState> originalBlocks = new LinkedHashMap<>();
-        ServerPlayer player = context.makeMockServerPlayerInLevel();
+        ServerPlayer player = MockPlayers.spawn(context);
         try {
             for (BlockPos pos :
                     BlockPos.betweenClosed(center.offset(-2, -2, -2), center.offset(2, 2, 2))) {
