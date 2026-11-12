@@ -22,15 +22,15 @@ heavy status
 GTR_RECORDING_PROFILE=showcase heavy --mem 6G --label accelerateddamage-recording -- ./gradlew --no-daemon :fabric:recordClientGameTest
 ```
 
-Recordings and their JSON metadata are written to `build/recordings`. The showcase films each rule against player-shaped targets, and every target's health is printed above its head and in the caption after each hit:
+Recordings and their JSON metadata are written to `build/recordings`. The showcase films each rule against player-shaped targets and prints the target's health in the caption after every hit. Every scenario runs twice in the same scene with the same inputs, first about two seconds with its rules off, then about two seconds with them on:
 
-- rapid melee, and drowning;
-- a bow, five crossbows that are loaded before the stage so the stage holds only the shots, a crossbow of firework rockets, and five tridents;
-- three rows of effects, one target per family: fire, lava, poison, wither; freezing, cactus, drying out; starvation, a lingering cloud and hunger-based regeneration;
-- the damage effects again with the rule off, where the numbers barely move over the same time.
+- a wooden sword, sixteen hits one every two ticks, with `disable_attack_cooldown` and `disable_i_frames` off, then on;
+- drowning, with `faster_effect_ticking` and `disable_i_frames` off, then on;
+- a bow (sixteen arrows), nine loaded crossbows, nine crossbows of firework rockets and nine tridents, one shot every two ticks under `instant_shoot`, with `disable_i_frames` off, then on;
+- three rows of effects, one target per family, with `faster_effect_ticking` and `disable_i_frames` off, then on: fire, lava, poison, wither; freezing, cactus, drying out; starvation, a lingering poison cloud and regeneration from saturation.
 
-The negative cases are their own stages, each with a caption and the target's health after every hit: the vanilla drowning comparison (air 300, 290, 280, 270 against the accelerated 300, 200, 100, 0), the rule-off weapon cases and the vanilla effect baseline. The conventions' `withDedicatedServer` starts and stops the recording itself; the test never calls `startRecording` or `stopRecording`.
+The weapon targets stand pinned in place, so the player aims once per scenario and never walks or turns between hits. The server logs the game tick of every attack and shot (`AD_TICKLOG` lines) and the target's health before and after every hit, and fails the run when two inputs are more than five ticks apart, when a hit with the rules on deals no damage, or when, with the rules off, a hit inside vanilla's damage cooldown lands in full. The effect halves log their health readings as `AD_CURVE` lines. The conventions' `withDedicatedServer` starts and stops the recording itself; the test never calls `startRecording` or `stopRecording`.
 
-Every player-shaped dummy is created in the `beforeJoin` hook, while the client is not yet connected, so no join line can ever appear in a recorded frame; between stages a dummy waits far above the arena and its stage teleports it into the shot.
+Every player-shaped dummy is created and every cell is built in the `beforeJoin` hook, while the client is not yet connected, so no join line and no building can appear in a recorded frame. Between scenarios a dummy waits far above the arena, and its scenario teleports it into the shot.
 
 A player-shaped target needs one extra call to tick: `ServerPlayer#tick` runs only the connection half of a player's tick, and the `Player`/`LivingEntity`/`Entity` half (fire, effects, freezing, air, hunger) runs from `doTick()`, which a real client's connection calls. The showcase registers `ServerTickEvents.START_SERVER_TICK` and calls `doTick()` on every showcase target, which is what makes effects tick on a fake player at all.

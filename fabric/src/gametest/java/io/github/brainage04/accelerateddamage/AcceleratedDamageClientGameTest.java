@@ -10,17 +10,28 @@ import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Options;
+import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.Connection;
@@ -31,6 +42,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
@@ -41,6 +53,7 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -55,8 +68,14 @@ import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 
 /// The showcase the owner asked for: every rule, filmed against player-shaped targets with the
-/// target's health printed in the caption and above its head after every hit, so a hit landing is
-/// visible twice.
+/// target's health printed in the caption after every hit, so a hit landing is visible.
+///
+/// <p>Every scenario runs twice in the same scene with the same inputs: about two seconds with the
+/// scenario's rules off, then about two seconds with them on. Weapons hit every two game ticks with
+/// the real attack or use key, and the server writes down the game tick of every attack and shot
+/// and the target's health before and after every hit. A half fails when two inputs are more than
+/// five ticks apart, when a hit with the rules on deals no damage, or when, with the rules off, a
+/// hit inside vanilla's damage cooldown lands in full.
 ///
 /// <p>Player-shaped targets are {@link ServerPlayer}s, and a {@link ServerPlayer} only runs the
 /// {@code Player}/{@code LivingEntity}/{@code Entity} half of its tick from {@code doTick()}, which
@@ -66,27 +85,49 @@ import net.minecraft.world.phys.Vec3;
 /// server tick, which is the call vanilla makes for a real player.
 ///
 /// <p>Every on-camera action goes through {@link ClientGameTestPlayerActions} and the real key
-/// bindings: the player turns to a target, stands inside vanilla reach and presses the attack or
-/// use key on the crosshair target. Only the camera moves directly. Chat lines from the fake
-/// targets joining and leaving are cleared before each stage, and no target dies on camera, so the
-/// film has no chat clutter.
+/// bindings. The camera faces each scenario's target from its first frame: the teleport into the
+/// scene carries the view, and nothing turns the camera inside a scenario.
 @SuppressWarnings("UnstableApiUsage")
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
     private static final int ARENA_Y = 64;
-    private static final double MELEE_DISTANCE = 2.6D;
     private static final double RANGE_X = -6.5D;
-    private static final double FIREWORK_RANGE_Z = 8.5D;
+    private static final Vec3 MELEE_STAND = new Vec3(0.5, ARENA_Y, 1.5);
+    private static final Vec3 MELEE_TARGET = new Vec3(0.5, ARENA_Y, 4.5);
+    private static final Vec3 RANGE_STAND = new Vec3(RANGE_X, ARENA_Y, 0.5);
+    private static final Vec3 RANGE_TARGET = new Vec3(RANGE_X, ARENA_Y, 4.5);
+    private static final Vec3 FIREWORK_TARGET = new Vec3(RANGE_X, ARENA_Y, 8.5);
+    private static final Vec3 DROWNING_STAND = new Vec3(9.5, ARENA_Y, -6.5);
+    private static final Vec3 DROWNING_VIEW = new Vec3(9.5, ARENA_Y + 0.6, -3.2);
 
-    /// A weapon target survives every hit of its stage, so no death message lands in the film.
-    private static final float WEAPON_TARGET_HEALTH = 60.0F;
+    /// A weapon target survives both halves of its scenario, so no death message lands in the film.
+    private static final float WEAPON_TARGET_HEALTH = 200.0F;
 
-    /// An effect target is healthy enough to keep showing numbers for the whole stage.
+    /// An effect target is healthy enough to keep showing numbers for the whole scenario.
     private static final float EFFECT_TARGET_HEALTH = 300.0F;
 
-    /// Effect targets that only have to survive a short rule-off comparison.
-    private static final float COMPARISON_TARGET_HEALTH = 20.0F;
-
     private static final int READING_TICKS = 14;
+
+    /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
+    private static final int INPUT_CADENCE_TICKS = 2;
+
+    /// A bow or trident is drawn on one tick and released on the next. The server's synced
+    /// "using an item" flag for that draw reaches the client a tick after the release and starts
+    /// the use again on the client (LocalPlayer.java:596-606 in the 26.3 sources), which swallows
+    /// a use press in that tick. The next draw therefore starts a tick later, three ticks apart.
+    private static final int DRAW_CADENCE_TICKS = 3;
+
+    private static final int MAX_INPUT_GAP_TICKS = 5;
+
+    /// Vanilla's damage cooldown: a full hit sets it to 20, and while it is above 10 a later hit
+    /// only deals what exceeds the last one (LivingEntity.java:1219-1232 in the 26.3 sources).
+    private static final int VANILLA_WINDOW_TICKS = 10;
+
+    private static final int MELEE_HITS = 16;
+    private static final int BOW_SHOTS = 14;
+    private static final int HOTBAR_SHOTS = 9;
+
+    /// A filmed half lasts about two seconds.
+    private static final int HALF_TICKS = 40;
 
     /// Where an off-stage dummy waits: far above the arena and outside every camera's view.
     private static final Vec3 PARKING = new Vec3(0.5, 200.0, 0.5);
@@ -108,38 +149,157 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     "Cactus",
                     "Starving",
                     "Regenerating",
-                    "Cloud",
-                    "MeleeDummyOff",
-                    "BowDummyOff",
-                    "CrossbowDummyOff",
-                    "TridentDummyOff",
-                    "FireOff",
-                    "PoisonOff",
-                    "WitherOff");
+                    "PoisonCloud");
 
     private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
 
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
-    private static boolean tickListenerRegistered;
+    private static boolean listenersRegistered;
+
+    /// The game tick the server is on, set at the start of every server tick.
+    private static volatile int serverTick;
+
+    /// The log of the half being filmed, or {@code null} between halves. Written on the server
+    /// thread only.
+    private static volatile HitLog hitLog;
 
     /// A fake player the showcase keeps ticking, with the position to hold it at (or {@code null}
     /// to let knockback move it) and the text its name tag shows.
     private record TrackedTarget(UUID id, String name, Vec3 anchor) {}
 
+    /// One hit that reached the target: the game tick, and the target's health before the hit and
+    /// before whatever reached it next.
+    private static final class Hit {
+        private final int tick;
+        private final float before;
+        private float after;
+
+        private Hit(int tick, float before) {
+            this.tick = tick;
+            this.before = before;
+            this.after = before;
+        }
+
+        private float damage() {
+            return before - after;
+        }
+    }
+
+    /// The server's record of one filmed half: the game tick of every attack and every projectile
+    /// of the recorded player, and every hit on the target.
+    private static final class HitLog {
+        private final String stage;
+        private final int playerId;
+        private final int targetId;
+        private final int openTick;
+        private final List<Integer> inputTicks = new ArrayList<>();
+        private final List<Hit> hits = new ArrayList<>();
+        private int closeTick;
+
+        private HitLog(String stage, int playerId, int targetId, int openTick) {
+            this.stage = stage;
+            this.playerId = playerId;
+            this.targetId = targetId;
+            this.openTick = openTick;
+        }
+
+        private void hit(int tick, float health) {
+            finishLastHit(health);
+            hits.add(new Hit(tick, health));
+        }
+
+        private void close(int tick, float health) {
+            finishLastHit(health);
+            closeTick = tick;
+        }
+
+        private void finishLastHit(float health) {
+            if (!hits.isEmpty()) {
+                hits.getLast().after = health;
+            }
+        }
+
+        private int minGap() {
+            int min = Integer.MAX_VALUE;
+            for (int index = 1; index < inputTicks.size(); index++) {
+                min = Math.min(min, inputTicks.get(index) - inputTicks.get(index - 1));
+            }
+            return min;
+        }
+
+        private int maxGap() {
+            int max = 0;
+            for (int index = 1; index < inputTicks.size(); index++) {
+                max = Math.max(max, inputTicks.get(index) - inputTicks.get(index - 1));
+            }
+            return max;
+        }
+
+        private int landed() {
+            return (int) hits.stream().filter(hit -> hit.damage() > 0.0F).count();
+        }
+
+        /// One line the take's log keeps, for the cadence table of the report.
+        private String describe() {
+            StringBuilder line = new StringBuilder("AD_TICKLOG ");
+            line.append(stage)
+                    .append(" inputs=")
+                    .append(inputTicks.size())
+                    .append(" minGap=")
+                    .append(minGap())
+                    .append(" maxGap=")
+                    .append(maxGap())
+                    .append(" hits=")
+                    .append(hits.size())
+                    .append(" landed=")
+                    .append(landed())
+                    .append(" inputTicks=")
+                    .append(inputTicks)
+                    .append(" hitTicks=[");
+            for (int index = 0; index < hits.size(); index++) {
+                Hit hit = hits.get(index);
+                if (index > 0) {
+                    line.append(", ");
+                }
+                line.append(hit.tick)
+                        .append(':')
+                        .append(health(hit.before))
+                        .append('>')
+                        .append(health(hit.after));
+            }
+            return line.append(']').toString();
+        }
+    }
+
+    /// Puts one effect scenario's targets in place for one half, with fresh health and effects.
+    /// {@code previous} holds the ids of the first half's targets, or is empty in the first half.
+    @FunctionalInterface
+    private interface EffectSetup {
+        List<Integer> place(MinecraftServer server, List<Integer> previous);
+    }
+
+    /// One effect scenario: its targets' names in caption order, which of them heal instead of
+    /// taking damage, and which of them vanilla may hurt by at most four health in a half.
+    private record EffectScene(
+            String id,
+            String subject,
+            Vec3 stand,
+            Vec3 view,
+            List<String> names,
+            Set<String> healers,
+            Set<String> slowInVanilla,
+            EffectSetup setup) {}
+
     @Override
     public void runTest(ClientGameTestContext context) {
-        registerTickListener();
+        registerListeners();
         Properties serverProperties = ClientGameTestServers.flatServerProperties();
-        // Every dummy joins before the client does, and vanilla refuses a connection once the
-        // player
-        // list is full (twenty by default), which would lock the recorded client out.
+        // Fabric's test server allows one player (DedicatedServerImplUtil sets max-players to 1),
+        // and every dummy joins before the recorded client, which the full server would refuse.
         serverProperties.setProperty("max-players", "40");
-
         // ClientGameTestServers.withDedicatedServer starts the recording before the world exists
-        // and
-        // stops it after the world is gone, so this test never starts or stops it itself. The arena
-        // is
-        // built in its beforeJoin hook, so no frame shows the world being built.
+        // and stops it after the world is gone, so this test never starts or stops it itself. The
+        // arena is built in its beforeJoin hook, so no frame shows the world being built.
         ClientGameTestServers.withDedicatedServer(
                 context,
                 serverProperties,
@@ -157,7 +317,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
                         context.waitTicks(20);
                         // The title card covers the tour that loads every viewpoint, so the first
-                        // stage never opens on an unloaded chunk.
+                        // scenario never opens on an unloaded chunk.
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.ready",
@@ -169,19 +329,40 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         recordMelee(context, server, playerId);
                         recordDrowning(context, server, playerId);
                         recordBow(context, server, playerId);
-                        recordCrossbow(context, server, playerId);
-                        recordFirework(context, server, playerId);
-                        recordTrident(context, server, playerId);
-                        recordDamageEffects(context, server, playerId);
-                        recordFreezingAndContact(context, server, playerId);
-                        recordHungerCloudAndHealing(context, server, playerId);
-                        recordEffectsOff(context, server, playerId);
-                        recordDrowningOff(context, server, playerId);
-
-                        ClientGameTestCommands.clearChat(context);
-                        ClientGameTestStages.markStage("showcase.negatives");
-                        assertNegativeCases(context, server, playerId);
-                        ClientGameTestStages.endStage("showcase.negatives");
+                        recordLoadedHotbar(
+                                context,
+                                server,
+                                playerId,
+                                "crossbow",
+                                "Nine loaded crossbows",
+                                "CrossbowDummy",
+                                RANGE_TARGET,
+                                slot -> loadedCrossbow(new ItemStack(Items.ARROW)),
+                                INPUT_CADENCE_TICKS);
+                        recordLoadedHotbar(
+                                context,
+                                server,
+                                playerId,
+                                "firework",
+                                "Nine crossbows of rockets",
+                                "FireworkDummy",
+                                FIREWORK_TARGET,
+                                slot -> loadedCrossbow(fireworkRocket()),
+                                INPUT_CADENCE_TICKS);
+                        recordLoadedHotbar(
+                                context,
+                                server,
+                                playerId,
+                                "trident",
+                                "A trident every 3 ticks",
+                                "TridentDummy",
+                                RANGE_TARGET,
+                                slot -> new ItemStack(Items.TRIDENT),
+                                DRAW_CADENCE_TICKS);
+                        recordEffectScene(context, server, playerId, damageEffectsScene());
+                        recordEffectScene(context, server, playerId, contactEffectsScene());
+                        recordEffectScene(context, server, playerId, hungerEffectsScene());
+                        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
                         ClientGameTestCommands.clearChat(context);
                         context.waitTicks(4);
                     } finally {
@@ -191,13 +372,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
     }
 
-    /// Visits every viewpoint before the film starts, so a stage never opens on a chunk the client
-    /// has not built yet. The recorder keeps running from the first frame, so a teleport later
-    /// costs only a few ticks.
+    /// Visits every viewpoint before the film starts, so a scenario never opens on a chunk the
+    /// client has not built yet. The recorder keeps running from the first frame, so a teleport
+    /// later costs only a few ticks.
     private static void preloadArena(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         double[][] viewpoints = {
-            {0.5, -2.5},
+            {0.0, -2.5},
             {0.5, -18.5},
             {0.5, -34.5},
             {9.5, -6.5},
@@ -220,33 +401,49 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ClientGameTestWaits.waitForChunkWindow(context, 3, 600);
             ClientGameTestWaits.waitForRenderSettled(context, 4, 600);
         }
-        server.runOnServer(
-                current ->
-                        player(current, playerId)
-                                .teleportTo(
-                                        current.overworld(),
-                                        0.5,
-                                        ARENA_Y,
-                                        0.5,
-                                        Set.of(),
-                                        0.0F,
-                                        0.0F,
-                                        false));
-        context.waitTicks(6);
-        ClientGameTestWaits.waitForRenderSettled(context, 4, 600);
     }
 
-    private static void registerTickListener() {
-        if (tickListenerRegistered) {
+    private static void registerListeners() {
+        if (listenersRegistered) {
             return;
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
-        tickListenerRegistered = true;
+        AttackEntityCallback.EVENT.register(
+                (player, level, hand, entity, hitResult) -> {
+                    HitLog log = hitLog;
+                    if (log != null
+                            && !level.isClientSide()
+                            && player.getId() == log.playerId
+                            && entity.getId() == log.targetId) {
+                        log.inputTicks.add(serverTick);
+                    }
+                    return InteractionResult.PASS;
+                });
+        ServerEntityEvents.ENTITY_LOAD.register(
+                (entity, level) -> {
+                    HitLog log = hitLog;
+                    if (log != null
+                            && entity instanceof Projectile projectile
+                            && projectile.getOwner() != null
+                            && projectile.getOwner().getId() == log.playerId) {
+                        log.inputTicks.add(serverTick);
+                    }
+                });
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register(
+                (entity, source, amount) -> {
+                    HitLog log = hitLog;
+                    if (log != null && entity.getId() == log.targetId) {
+                        log.hit(serverTick, entity.getHealth());
+                    }
+                    return true;
+                });
+        listenersRegistered = true;
     }
 
     /// Runs the half of a player's tick that a real client's connection runs for it.
     private static void tickTrackedTargets(MinecraftServer server) {
+        serverTick = server.getTickCount();
         if (TRACKED.isEmpty()) {
             return;
         }
@@ -266,14 +463,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Builds the whole showcase arena. It runs before the client joins, so the film starts on a
-    /// finished set.
+    /// Builds the whole showcase arena, every scenario's cells included. It runs before the client
+    /// joins, so the film starts on a finished set and no scenario builds anything on camera.
     private static void buildArena(MinecraftServer server) {
         ServerLevel level = server.overworld();
         restoreRules(server);
         // Every target is a player, and a server whose PvP game rule is off rejects all
-        // player-versus-player damage in
-        // ServerPlayer#hurtServer, so the showcase world runs with the rule on.
+        // player-versus-player damage in ServerPlayer#hurtServer, so the showcase world runs with
+        // the rule on.
         level.getGameRules().set(GameRules.PVP, true, server);
         for (int x = -10; x <= 16; x++) {
             for (int z = -46; z <= 10; z++) {
@@ -288,9 +485,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             level.setBlockAndUpdate(
                     new BlockPos(x, ARENA_Y - 1, 0), Blocks.GLOWSTONE.defaultBlockState());
         }
-        // The melee target's back is against this wall, so a knockback that a player could not
-        // chase inside the
-        // ten-tick window still leaves the target in reach for the next hit.
+        // A wall behind the melee target, so the scene has a backdrop.
         for (int x = -4; x <= 4; x++) {
             for (int y = ARENA_Y; y <= ARENA_Y + 2; y++) {
                 level.setBlockAndUpdate(
@@ -312,21 +507,34 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
 
+        // The flat world has air under the arena floor, so every sand block gets stone under it:
+        // unsupported sand falls, and a cactus on falling sand breaks.
         for (int x = 7; x <= 11; x++) {
             for (int z = -9; z <= -4; z++) {
-                level.setBlockAndUpdate(
-                        new BlockPos(x, ARENA_Y - 1, z), Blocks.SAND.defaultBlockState());
+                setBlock(level, x, ARENA_Y - 2, z, Blocks.STONE);
+                setBlock(level, x, ARENA_Y - 1, z, Blocks.SAND);
             }
         }
+        for (int[] spot : new int[][] {{9, -8}, {8, -5}, {10, -4}, {7, -7}}) {
+            level.setBlockAndUpdate(
+                    new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
+        }
+
+        plainCell(level, -5, -8);
+        lavaCell(level, -2, -8);
+        plainCell(level, 1, -8);
+        plainCell(level, 4, -8);
+        snowCell(level, -4, -24);
+        cactusCell(level, 0, -24);
+        plainCell(level, 4, -24);
+        plainCell(level, -4, -40);
+        plainCell(level, 0, -40);
+        plainCell(level, 4, -40);
 
         // Every dummy joins here, before the client connects: a join line that is broadcast while
         // nobody is connected can never appear in a recorded frame.
         for (String name : DUMMY_NAMES) {
             createDummy(server, name);
-        }
-        for (int[] spot : new int[][] {{9, -8}, {8, -5}, {10, -4}, {7, -7}}) {
-            level.setBlockAndUpdate(
-                    new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
         }
     }
 
@@ -350,8 +558,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.setGameMode(GameType.SURVIVAL);
     }
 
-    /// Puts the recording player back to full health, full air and unlit, so a stage never starts
-    /// wounded, drowned or on fire. A death screen would cover every later stage.
+    /// Puts the recording player back to full health, full air and unlit, so a scenario never
+    /// starts wounded, drowned or on fire. A death screen would cover every later scenario.
     private static void healPlayer(MinecraftServer server, int playerId) {
         ServerPlayer player = player(server, playerId);
         player.setHealth(player.getMaxHealth());
@@ -361,9 +569,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.removeAllEffects();
     }
 
-    /// Clears the chat lines the fake targets add when they join or leave, then opens the stage.
-    /// Spawn a target before calling this, so its join line is wiped before the first frame of the
-    /// stage.
+    /// Clears the chat panel and shows the half's caption. The scene is already in place, so the
+    /// first frame with this caption shows the scene it names.
     private static void openStage(
             ClientGameTestContext context, String id, String title, String subtitle) {
         ClientGameTestCommands.clearChat(context);
@@ -375,192 +582,413 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestStages.endStage(context, id, holdTicks);
     }
 
-    private static void standAt(
+    /// Teleports the player into a scenario's scene, already facing the point it looks at, and
+    /// waits until the scene is built on the client. The caption of the previous scenario is still
+    /// on screen, so the cut drops these frames.
+    private static void enterScene(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
-            double x,
-            double z,
-            float yaw) {
+            Vec3 stand,
+            Vec3 view) {
         server.runOnServer(
                 current -> {
                     healPlayer(current, playerId);
-                    player(current, playerId)
-                            .teleportTo(
-                                    current.overworld(), x, ARENA_Y, z, Set.of(), yaw, 0.0F, false);
+                    ServerPlayer player = player(current, playerId);
+                    player.teleportTo(
+                            current.overworld(),
+                            stand.x,
+                            stand.y,
+                            stand.z,
+                            Set.of(),
+                            player.getYRot(),
+                            player.getXRot(),
+                            false);
+                    player.lookAt(EntityAnchorArgument.Anchor.EYES, view);
                 });
         context.waitTicks(6);
         ClientGameTestWaits.waitForChunkWindow(context, 4, 200);
         ClientGameTestWaits.waitForRenderSettled(context, 4, 200);
+        // The view is already on the point, so this aim settles the client's own rotation without
+        // a visible turn.
+        ClientGameTestPlayerActions.lookAt(context, view);
+    }
+
+    private static void setDamageRules(
+            MinecraftServer server, boolean disableIFrames, boolean disableAttackCooldown) {
+        GameRules rules = server.overworld().getGameRules();
+        rules.set(ModGameRules.DISABLE_IFRAMES, disableIFrames, server);
+        rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, disableAttackCooldown, server);
     }
 
     private static void recordMelee(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.melee",
-                "Rapid melee: every hit lands",
-                "Five sword hits, one per tick of the window");
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            ServerLevel level = current.overworld();
-                            GameRules rules = level.getGameRules();
-                            rules.set(ModGameRules.DISABLE_IFRAMES, true, current);
-                            rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, true, current);
-                            healPlayer(current, playerId);
-                            ServerPlayer player = player(current, playerId);
-                            giveSword(player);
-                            player.teleportTo(
-                                    level, 0.5, ARENA_Y, 1.5, Set.of(), 0.0F, 0.0F, false);
+                            giveSword(player(current, playerId));
                             return placeTarget(
                                     current,
                                     "MeleeDummy",
-                                    new Vec3(0.5, ARENA_Y, 4.5),
+                                    MELEE_TARGET,
                                     WEAPON_TARGET_HEALTH,
-                                    false);
+                                    180.0F);
                         });
-        context.waitTicks(6);
-        strikeRepeatedly(
-                context,
-                server,
-                playerId,
-                targetId,
-                5,
-                true,
-                true,
-                true,
-                "showcase.melee",
-                "Rapid melee: every hit lands");
-        closeStage(context, "showcase.melee", 20);
+        // Aim at the neck rather than the middle of the body: the name tag above the head then
+        // sits near the middle of the frame instead of under the caption panel.
+        Vec3 neck = chest(server, targetId).add(0.0, 0.45, 0.0);
+        enterScene(context, server, playerId, MELEE_STAND, neck);
+        meleeHalf(context, server, playerId, targetId, false);
+        meleeHalf(context, server, playerId, targetId, true);
         server.runOnServer(current -> parkTarget(current, targetId));
     }
 
-    /// Attacks the target with the real attack key until the shot budget runs out, prints its
-    /// health after every hit and checks the pattern the rule promises: every hit lands when it is
-    /// on, only the first one of the window when it is off.
-    private static void strikeRepeatedly(
+    /// Sixteen sword hits, one every two ticks, with the real attack key on a target pinned in
+    /// place, so the player never walks or turns between hits.
+    private static void meleeHalf(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
             int targetId,
-            int hits,
-            boolean accelerated,
-            boolean chase,
-            boolean filmed,
-            String stepId,
-            String stepTitle) {
-        float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
-        for (int hit = 1; hit <= hits; hit++) {
-            if (chase || hit == 1) {
-                Vec3 position =
-                        server.computeOnServer(current -> entity(current, targetId).position());
-                // A sword's minimum attack range is two blocks, so the player stands 2.6 blocks out
-                // and still inside
-                // vanilla entity reach.
-                ClientGameTestPlayerActions.walkTo(context, position, MELEE_DISTANCE);
-            }
-            // Aim at the neck rather than the middle of the body: the name tag above the head then
-            // sits near the middle of the frame instead of under the caption panel.
-            ClientGameTestPlayerActions.lookAt(
-                    context, chest(server, targetId).add(0.0, 0.45, 0.0));
+            boolean rulesOn) {
+        String stage = "showcase.melee-" + (rulesOn ? "on" : "off");
+        String title =
+                "Sword every 2 ticks, cooldown and i-frame rules " + (rulesOn ? "on" : "off");
+        openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+        openHitLog(
+                server,
+                stage,
+                playerId,
+                targetId,
+                current -> {
+                    setDamageRules(current, rulesOn, rulesOn);
+                    resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                });
+        for (int hit = 1; hit <= MELEE_HITS; hit++) {
             ClientGameTestPlayerActions.attackEntity(context, targetId);
-            context.waitTicks(5);
-            float health = server.computeOnServer(current -> living(current, targetId).getHealth());
-            if (filmed) {
-                ClientGameTestRecorder.showStep(
-                        context, stepId, stepTitle, "hit " + hit + ", health " + health(health));
+            context.waitTicks(INPUT_CADENCE_TICKS - 1);
+            showHealth(context, server, targetId, stage, title, "hit " + hit);
+        }
+        finishHalf(context, server, stage, MELEE_HITS, rulesOn);
+    }
+
+    private static void recordBow(
+            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        int targetId =
+                server.computeOnServer(
+                        current -> {
+                            ServerPlayer player = player(current, playerId);
+                            player.getInventory().clearContent();
+                            player.getInventory().setItem(0, new ItemStack(Items.BOW));
+                            player.getInventory().setItem(8, new ItemStack(Items.ARROW, 64));
+                            player.getInventory().setSelectedSlot(0);
+                            current.overworld()
+                                    .getGameRules()
+                                    .set(ModGameRules.INSTANT_SHOOT, true, current);
+                            return placeTarget(
+                                    current,
+                                    "BowDummy",
+                                    RANGE_TARGET,
+                                    WEAPON_TARGET_HEALTH,
+                                    180.0F);
+                        });
+        enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
+        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
+        // while the client's carried item is empty, whatever the server's main hand holds.
+        context.getInput().pressKey(options -> options.keyHotbarSlots[0]);
+        for (boolean rulesOn : new boolean[] {false, true}) {
+            String stage = "showcase.bow-" + (rulesOn ? "on" : "off");
+            String title = "Bow, an arrow every 3 ticks, i-frame rule " + (rulesOn ? "on" : "off");
+            openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+            openHitLog(
+                    server,
+                    stage,
+                    playerId,
+                    targetId,
+                    current -> {
+                        setDamageRules(current, rulesOn, false);
+                        resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                    });
+            for (int shot = 1; shot <= BOW_SHOTS; shot++) {
+                // One tick of draw, then the release on the next tick fires a full-power arrow
+                // under instant_shoot.
+                context.getInput().holdKeyFor(options -> options.keyUse, 1);
+                context.waitTicks(DRAW_CADENCE_TICKS - 1);
+                showHealth(context, server, targetId, stage, title, "shot " + shot);
             }
-            ClientGameTestRecorder.log(context, "hit " + hit + "  target health " + health);
-            if (accelerated && health >= previous) {
+            finishHalf(context, server, stage, BOW_SHOTS, rulesOn);
+        }
+        server.runOnServer(current -> parkTarget(current, targetId));
+    }
+
+    /// Nine weapons in the hotbar, one per slot, fired one after another: the hotbar key and the
+    /// use key go down in the same tick. A loaded crossbow fires on the press, and a trident is
+    /// thrown on the release a tick later.
+    private static void recordLoadedHotbar(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int playerId,
+            String name,
+            String subject,
+            String dummy,
+            Vec3 targetPosition,
+            IntFunction<ItemStack> weapon,
+            int cadenceTicks) {
+        int targetId =
+                server.computeOnServer(
+                        current -> {
+                            current.overworld()
+                                    .getGameRules()
+                                    .set(ModGameRules.INSTANT_SHOOT, true, current);
+                            fillHotbar(player(current, playerId), weapon);
+                            return placeTarget(
+                                    current, dummy, targetPosition, WEAPON_TARGET_HEALTH, 180.0F);
+                        });
+        enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
+        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        for (boolean rulesOn : new boolean[] {false, true}) {
+            String stage = "showcase." + name + "-" + (rulesOn ? "on" : "off");
+            String title = subject + ", i-frame rule " + (rulesOn ? "on" : "off");
+            server.runOnServer(current -> fillHotbar(player(current, playerId), weapon));
+            waitForClientHotbar(context, weapon);
+            openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+            openHitLog(
+                    server,
+                    stage,
+                    playerId,
+                    targetId,
+                    current -> {
+                        setDamageRules(current, rulesOn, false);
+                        resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                    });
+            for (int shot = 1; shot <= HOTBAR_SHOTS; shot++) {
+                int slot = shot - 1;
+                Function<Options, KeyMapping> hotbarKey = options -> options.keyHotbarSlots[slot];
+                context.getInput().holdKey(hotbarKey);
+                context.getInput().holdKey(options -> options.keyUse);
+                context.waitTick();
+                context.getInput().releaseKey(options -> options.keyUse);
+                context.getInput().releaseKey(hotbarKey);
+                context.waitTicks(cadenceTicks - 1);
+                showHealth(context, server, targetId, stage, title, "shot " + shot);
+            }
+            finishHalf(context, server, stage, HOTBAR_SHOTS, rulesOn);
+        }
+        server.runOnServer(current -> parkTarget(current, targetId));
+    }
+
+    private static void fillHotbar(ServerPlayer player, IntFunction<ItemStack> weapon) {
+        player.getInventory().clearContent();
+        for (int slot = 0; slot < HOTBAR_SHOTS; slot++) {
+            player.getInventory().setItem(slot, weapon.apply(slot));
+        }
+    }
+
+    /// Waits until the client's own hotbar holds every weapon: the client sends no use packet for
+    /// a slot it still sees empty, so a press before the inventory update arrives would be lost.
+    private static void waitForClientHotbar(
+            ClientGameTestContext context, IntFunction<ItemStack> weapon) {
+        context.waitFor(
+                client -> {
+                    for (int slot = 0; slot < HOTBAR_SHOTS; slot++) {
+                        ItemStack held = client.player.getInventory().getItem(slot);
+                        if (!ItemStack.isSameItemSameComponents(held, weapon.apply(slot))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+    }
+
+    /// Starts the server's log of one half, after the server has set the half's rules and target.
+    private static void openHitLog(
+            TestDedicatedServerContext server,
+            String stage,
+            int playerId,
+            int targetId,
+            Consumer<MinecraftServer> prepare) {
+        server.runOnServer(
+                current -> {
+                    prepare.accept(current);
+                    hitLog = new HitLog(stage, playerId, targetId, serverTick);
+                });
+    }
+
+    private static void showHealth(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int targetId,
+            String stage,
+            String title,
+            String label) {
+        float health = server.computeOnServer(current -> living(current, targetId).getHealth());
+        ClientGameTestRecorder.showStep(
+                context, stage, title, label + ", health " + health(health));
+    }
+
+    /// Waits until every projectile of the half has reached the target, closes the server's log,
+    /// holds the picture until the half has run about two seconds, and checks the log.
+    private static void finishHalf(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            String stage,
+            int expectedInputs,
+            boolean rulesOn) {
+        try {
+            ClientGameTestWaits.waitForServer(
+                    context,
+                    server,
+                    current -> {
+                        HitLog log = hitLog;
+                        return log.inputTicks.size() >= expectedInputs
+                                && log.hits.size() >= log.inputTicks.size();
+                    },
+                    60,
+                    "every attack or shot of " + stage + " to reach the target");
+        } catch (AssertionError timeout) {
+            throw new AssertionError(
+                    timeout.getMessage()
+                            + ": "
+                            + server.computeOnServer(current -> hitLog.describe()),
+                    timeout);
+        }
+        HitLog log =
+                server.computeOnServer(
+                        current -> {
+                            HitLog closing = hitLog;
+                            hitLog = null;
+                            closing.close(
+                                    serverTick, living(current, closing.targetId).getHealth());
+                            return closing;
+                        });
+        System.out.println(log.describe());
+        closeStage(context, stage, Math.max(6, HALF_TICKS - (log.closeTick - log.openTick)));
+        assertCadence(log, expectedInputs);
+        if (rulesOn) {
+            assertEveryHitLands(log);
+        } else {
+            assertVanillaWindows(log);
+        }
+    }
+
+    /// Every attack or shot reached the server, and no two of them are more than five ticks apart.
+    private static void assertCadence(HitLog log, int expectedInputs) {
+        if (log.inputTicks.size() != expectedInputs) {
+            throw new AssertionError(
+                    "Expected "
+                            + expectedInputs
+                            + " attacks or shots in "
+                            + log.stage
+                            + ", the server saw "
+                            + log.inputTicks.size()
+                            + ": "
+                            + log.describe());
+        }
+        if (log.maxGap() > MAX_INPUT_GAP_TICKS) {
+            throw new AssertionError(
+                    "Expected an attack or shot at least every "
+                            + MAX_INPUT_GAP_TICKS
+                            + " ticks in "
+                            + log.stage
+                            + ", the longest gap was "
+                            + log.maxGap()
+                            + ": "
+                            + log.describe());
+        }
+    }
+
+    /// With the rules on, every hit that reaches the target takes health off it.
+    private static void assertEveryHitLands(HitLog log) {
+        for (Hit hit : log.hits) {
+            if (hit.damage() <= 0.0F) {
                 throw new AssertionError(
-                        "Expected hit "
-                                + hit
-                                + " to damage the target; health stayed at "
-                                + health
+                        "Expected every hit in "
+                                + log.stage
+                                + " to damage the target, the hit at tick "
+                                + hit.tick
+                                + " left it at "
+                                + hit.after
                                 + ": "
-                                + server.computeOnServer(
-                                        current -> describeTarget(current, targetId, playerId)));
+                                + log.describe());
             }
-            if (!accelerated && hit > 1 && health != previous) {
+        }
+    }
+
+    /// With the rules off, only the first hit of each vanilla damage-cooldown window lands in full:
+    /// a later hit inside the next ten ticks deals at most what exceeds the window's first hit, so
+    /// it always deals less than that hit.
+    private static void assertVanillaWindows(HitLog log) {
+        Hit opener = null;
+        int openers = 0;
+        for (Hit hit : log.hits) {
+            boolean windowOver = opener == null || hit.tick - opener.tick >= VANILLA_WINDOW_TICKS;
+            if (windowOver && hit.damage() > 0.0F) {
+                opener = hit;
+                openers++;
+            } else if (opener == null) {
                 throw new AssertionError(
-                        "Expected vanilla invincibility to reject hit "
-                                + hit
-                                + "; health fell from "
-                                + previous
-                                + " to "
-                                + health);
+                        "Expected the first hit of "
+                                + log.stage
+                                + " to damage the target: "
+                                + log.describe());
+            } else if (!windowOver && hit.damage() >= opener.damage()) {
+                throw new AssertionError(
+                        "Expected vanilla's damage cooldown to keep the hit at tick "
+                                + hit.tick
+                                + " in "
+                                + log.stage
+                                + " from landing in full: "
+                                + log.describe());
             }
-            previous = health;
-            if (health <= 0.0F) {
-                return;
-            }
+        }
+        if (openers >= log.hits.size()) {
+            throw new AssertionError(
+                    "Expected vanilla's damage cooldown to reject some hits in "
+                            + log.stage
+                            + ": "
+                            + log.describe());
         }
     }
 
     private static void recordDrowning(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.drowning",
-                "Drowning in two seconds",
-                "Air empties ten times faster");
+        enterScene(context, server, playerId, DROWNING_STAND, DROWNING_VIEW);
+        String offTitle = "Under water, effect and i-frame rules off";
+        openStage(context, "showcase.drowning-off", offTitle, "air 300, health 20");
         server.runOnServer(
                 current -> {
-                    GameRules rules = current.overworld().getGameRules();
-                    rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
+                    setEffectRules(current, false);
                     healPlayer(current, playerId);
-                    player(current, playerId)
-                            .teleportTo(
-                                    current.overworld(),
-                                    9.5,
-                                    ARENA_Y,
-                                    -6.5,
-                                    Set.of(),
-                                    0.0F,
-                                    0.0F,
-                                    false);
                 });
-        context.waitTicks(6);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
-        // The camera and the title card cost ticks under water, so the reading starts from a full
-        // lung.
-        server.runOnServer(current -> healPlayer(current, playerId));
-        reportAir(
-                context, server, playerId, "showcase.drowning", "Drowning in two seconds", "start");
-        context.waitTicks(10);
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning",
-                "Drowning in two seconds",
-                "10 ticks");
-        context.waitTicks(10);
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning",
-                "Drowning in two seconds",
-                "20 ticks");
-        context.waitTicks(10);
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning",
-                "Drowning in two seconds",
-                "air gone");
-        context.waitTicks(10);
-        int[] drowned =
-                reportAir(
-                        context,
-                        server,
-                        playerId,
-                        "showcase.drowning",
-                        "Drowning in two seconds",
-                        "health falling");
+        int[] slow = new int[2];
+        for (int reading = 0; reading <= 3; reading++) {
+            if (reading > 0) {
+                context.waitTicks(10);
+            }
+            slow = reportAir(context, server, playerId, "showcase.drowning-off", offTitle, reading);
+        }
+        if (slow[0] < 200 || slow[1] != 20) {
+            throw new AssertionError(
+                    "Expected vanilla air to last, air was " + slow[0] + " and health " + slow[1]);
+        }
+        closeStage(context, "showcase.drowning-off", 4);
+
+        String onTitle = "Under water, effect and i-frame rules on";
+        openStage(context, "showcase.drowning-on", onTitle, "air 300, health 20");
+        server.runOnServer(
+                current -> {
+                    setEffectRules(current, true);
+                    healPlayer(current, playerId);
+                });
+        int[] drowned = new int[2];
+        for (int reading = 0; reading <= 4; reading++) {
+            if (reading > 0) {
+                context.waitTicks(10);
+            }
+            drowned =
+                    reportAir(context, server, playerId, "showcase.drowning-on", onTitle, reading);
+        }
         if (drowned[0] > 0 || drowned[1] >= 20) {
             throw new AssertionError(
                     "Expected the air to run out and drowning damage to start, air was "
@@ -569,78 +997,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + drowned[1]);
         }
         // Out of the water before the next hit would kill: a death screen would cover every later
-        // stage.
-        server.runOnServer(current -> healPlayer(current, playerId));
-        closeStage(context, "showcase.drowning", 4);
-    }
-
-    /// The same two seconds under water with the rule off, filmed with its own numbers: vanilla
-    /// loses a bubble a second instead of the whole lung.
-    private static void recordDrowningOff(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.drowning-off",
-                "The same two seconds, vanilla",
-                "Air falls one tick a second, health holds");
+        // scenario.
         server.runOnServer(
                 current -> {
-                    current.overworld()
-                            .getGameRules()
-                            .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
+                    setEffectRules(current, false);
                     healPlayer(current, playerId);
-                    player(current, playerId)
-                            .teleportTo(
-                                    current.overworld(),
-                                    9.5,
-                                    ARENA_Y,
-                                    -6.5,
-                                    Set.of(),
-                                    0.0F,
-                                    0.0F,
-                                    false);
                 });
-        context.waitTicks(6);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(9.5, ARENA_Y + 0.6, -3.2));
-        server.runOnServer(current -> healPlayer(current, playerId));
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning-off",
-                "The same two seconds, vanilla",
-                "start");
-        context.waitTicks(10);
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning-off",
-                "The same two seconds, vanilla",
-                "10 ticks");
-        context.waitTicks(10);
-        reportAir(
-                context,
-                server,
-                playerId,
-                "showcase.drowning-off",
-                "The same two seconds, vanilla",
-                "20 ticks");
-        context.waitTicks(10);
-        int[] slow =
-                reportAir(
-                        context,
-                        server,
-                        playerId,
-                        "showcase.drowning-off",
-                        "The same two seconds, vanilla",
-                        "30 ticks");
-        if (slow[0] < 200 || slow[1] != 20) {
-            throw new AssertionError(
-                    "Expected vanilla air to last, air was " + slow[0] + " and health " + slow[1]);
-        }
-        server.runOnServer(current -> healPlayer(current, playerId));
-        closeStage(context, "showcase.drowning-off", 4);
+        closeStage(context, "showcase.drowning-on", 4);
     }
 
     private static int[] reportAir(
@@ -649,7 +1012,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int playerId,
             String stepId,
             String stepTitle,
-            String label) {
+            int reading) {
         int[] state =
                 server.computeOnServer(
                         current -> {
@@ -658,893 +1021,217 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 player.getAirSupply(), Math.round(player.getHealth())
                             };
                         });
-        String reading = label + ": air " + state[0] + ", health " + state[1];
-        ClientGameTestRecorder.showStep(context, stepId, stepTitle, reading);
-        ClientGameTestRecorder.log(context, reading);
+        String line = (reading * 10) + " ticks: air " + state[0] + ", health " + state[1];
+        ClientGameTestRecorder.showStep(context, stepId, stepTitle, line);
+        System.out.println("AD_CURVE " + stepId + " " + line);
         return state;
     }
 
-    private static void recordBow(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.bow",
-                "Bow: five arrows in one second",
-                "One tick of draw, a full-power arrow");
-        int targetId =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, true);
-                            ServerPlayer player = player(current, playerId);
-                            player.getInventory().setItem(0, new ItemStack(Items.BOW));
-                            player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "BowDummy",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(6);
-        shootRepeatedly(
-                context,
-                server,
-                playerId,
-                targetId,
-                5,
-                true,
-                true,
-                "showcase.bow",
-                "Bow: five arrows in one second");
-        closeStage(context, "showcase.bow", 20);
-        server.runOnServer(current -> parkTarget(current, targetId));
-    }
-
-    /// Five crossbows loaded with one bolt each, so the five bolts take only the shots themselves:
-    /// the stage beats the bow's one arrow per draw.
-    private static void recordCrossbow(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.crossbow",
-                "Crossbow: five loaded crossbows",
-                "No loading, five bolts in three quarters of a second");
-        int targetId =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, true);
-                            ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 5; slot++) {
-                                player.getInventory()
-                                        .setItem(slot, loadedCrossbow(new ItemStack(Items.ARROW)));
-                            }
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "CrossbowDummy",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(6);
-        shootLoadedCrossbows(
-                context,
-                server,
-                playerId,
-                targetId,
-                5,
-                4,
-                false,
-                "showcase.crossbow",
-                "Crossbow: five loaded crossbows");
-        closeStage(context, "showcase.crossbow", 20);
-        server.runOnServer(current -> parkTarget(current, targetId));
-    }
-
-    /// A crossbow of firework rockets, fired at a target eight blocks away so the blast reaches the
-    /// target and not the shooter. The rocket carries a firework explosion: a rocket item without a
-    /// {@code FIREWORKS} component has no explosion, and FireworkRocketEntity#dealExplosionDamage
-    /// then deals no damage at all.
-    private static void recordFirework(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.firework",
-                "Crossbow of fireworks",
-                "Each rocket explodes on the target");
-        int targetId =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, true);
-                            ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 4; slot++) {
-                                player.getInventory()
-                                        .setItem(slot, loadedCrossbow(fireworkRocket()));
-                            }
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "FireworkDummy",
-                                    new Vec3(RANGE_X, ARENA_Y, FIREWORK_RANGE_Z),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(6);
-        shootLoadedCrossbows(
-                context,
-                server,
-                playerId,
-                targetId,
-                4,
-                14,
-                false,
-                "showcase.firework",
-                "Crossbow of fireworks");
-        closeStage(context, "showcase.firework", 24);
-        server.runOnServer(current -> parkTarget(current, targetId));
-    }
-
-    private static void recordTrident(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.trident",
-                "Trident: five throws",
-                "The ten-tick wind-up is gone");
-        int targetId =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, true);
-                            ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 5; slot++) {
-                                player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
-                            }
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "TridentDummy",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(6);
-        shootLoadedCrossbows(
-                context,
-                server,
-                playerId,
-                targetId,
-                5,
-                4,
-                true,
-                "showcase.trident",
-                "Trident: five throws");
-        closeStage(context, "showcase.trident", 20);
-        server.runOnServer(current -> parkTarget(current, targetId));
-    }
-
-    private static void prepareShooter(
-            MinecraftServer server, int playerId, boolean disableIFrames) {
+    private static void setEffectRules(MinecraftServer server, boolean on) {
         GameRules rules = server.overworld().getGameRules();
-        rules.set(ModGameRules.INSTANT_SHOOT, true, server);
-        rules.set(ModGameRules.DISABLE_IFRAMES, disableIFrames, server);
-        ServerPlayer player = player(server, playerId);
-        // The ranged lane runs beside the melee wall, so a rocket that overshoots explodes in open
-        // air.
-        healPlayer(server, playerId);
-        player.teleportTo(server.overworld(), RANGE_X, ARENA_Y, 0.5, Set.of(), 0.0F, 0.0F, false);
-        player.getInventory().clearContent();
+        rules.set(ModGameRules.FASTER_EFFECT_TICKING, on, server);
+        rules.set(ModGameRules.DISABLE_IFRAMES, on, server);
+        rules.set(ModGameRules.INSTANT_SHOOT, false, server);
+        rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, false, server);
     }
 
-    /// Turns to the target, checks the crosshair is on it inside vanilla reach, and presses the use
-    /// key once per weapon in the hotbar's first slots. Each shot must take health off the target.
-    private static void shootLoadedCrossbows(
-            ClientGameTestContext context,
-            TestDedicatedServerContext server,
-            int playerId,
-            int targetId,
-            int shots,
-            int settleTicks,
-            boolean holdUse,
-            String stepId,
-            String stepTitle) {
-        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
-        for (int shot = 1; shot <= shots; shot++) {
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            // A shot is aimed, not attacked: the client picks an entity only inside
-            // Player.DEFAULT_ENTITY_INTERACTION_RANGE (three blocks), and a ranged target stands
-            // four or more blocks
-            // out, so the crosshair guard cannot pass there. The interaction-range guard and the
-            // real use key still
-            // prove the shot is one a player could take.
-            int hotbarSlot = shot - 1;
-            context.getInput().pressKey(options -> options.keyHotbarSlots[hotbarSlot]);
-            context.waitTicks(2);
-            ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            if (holdUse) {
-                context.getInput().holdKeyFor(options -> options.keyUse, 1);
-            } else {
-                context.getInput().pressKey(options -> options.keyUse);
-            }
-            context.waitTicks(settleTicks);
-            float health = server.computeOnServer(current -> living(current, targetId).getHealth());
-            ClientGameTestRecorder.showStep(
-                    context, stepId, stepTitle, "shot " + shot + ", health " + health(health));
-            ClientGameTestRecorder.log(context, "shot " + shot + "  target health " + health);
-            if (health >= previous) {
-                throw new AssertionError(
-                        "Expected shot "
-                                + shot
-                                + " to damage the target; health stayed at "
-                                + health
-                                + ": "
-                                + server.computeOnServer(
-                                        current -> describeTarget(current, targetId, playerId)));
-            }
-            previous = health;
-            if (health <= 0.0F) {
-                return;
-            }
-        }
-    }
-
-    /// Fires the bow with the real use key until the shot budget runs out, and prints the target's
-    /// health after every shot.
-    private static void shootRepeatedly(
-            ClientGameTestContext context,
-            TestDedicatedServerContext server,
-            int playerId,
-            int targetId,
-            int shots,
-            boolean accelerated,
-            boolean filmed,
-            String stepId,
-            String stepTitle) {
-        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
-        // while the
-        // client's carried item is empty, whatever the server's main hand holds.
-        context.getInput().pressKey(options -> options.keyHotbarSlots[0]);
-        context.waitTicks(2);
-        float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
-        float firstDrop = 0.0F;
-        for (int shot = 1; shot <= shots; shot++) {
-            // The negative case fires both shots inside one vanilla window, so it aims once: a
-            // fresh
-            // aim before every shot would put eight ticks between them and the window would lapse.
-            if (accelerated || shot == 1) {
-                ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-            }
-            context.getInput().holdKeyFor(options -> options.keyUse, 1);
-            context.waitTicks(4);
-            float health = server.computeOnServer(current -> living(current, targetId).getHealth());
-            float drop = previous - health;
-            if (filmed) {
-                ClientGameTestRecorder.showStep(
-                        context, stepId, stepTitle, "shot " + shot + ", health " + health(health));
-            }
-            ClientGameTestRecorder.log(context, "shot " + shot + "  target health " + health);
-            if (accelerated) {
-                if (drop <= 0.0F) {
-                    throw new AssertionError(
-                            "Expected shot "
-                                    + shot
-                                    + " to damage the target; health stayed at "
-                                    + health
-                                    + ": "
-                                    + server.computeOnServer(
-                                            current ->
-                                                    describeTarget(current, targetId, playerId)));
-                }
-            } else if (shot == 1) {
-                if (drop <= 0.0F) {
-                    throw new AssertionError(
-                            "Expected the first vanilla shot to damage the target; health stayed at "
-                                    + health);
-                }
-                firstDrop = drop;
-                // Vanilla still passes on the part of a later hit that exceeds the window's largest
-                // hit, so the
-                // negative case shows that no repeat hit lands in full rather than that nothing
-                // happens at all.
-            } else if (drop >= firstDrop) {
-                throw new AssertionError(
-                        "Expected vanilla invincibility to keep shot "
-                                + shot
-                                + " from landing in full; it took "
-                                + drop
-                                + " of the first hit's "
-                                + firstDrop);
-            }
-            previous = health;
-            if (health <= 0.0F) {
-                return;
-            }
-        }
-    }
-
-    private static void recordDamageEffects(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.effects-damage",
+    private static EffectScene damageEffectsScene() {
+        return new EffectScene(
+                "effects-damage",
                 "Fire, lava, poison, wither",
-                "Every effect ticks ten times faster");
-        standAt(context, server, playerId, 0.5, -2.5, 180.0F);
-        List<Integer> targets =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            GameRules rules = level.getGameRules();
-                            rules.set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
-                            rules.set(ModGameRules.DISABLE_IFRAMES, false, current);
-                            rules.set(ModGameRules.INSTANT_SHOOT, false, current);
-                            rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, false, current);
-                            player(current, playerId).getInventory().clearContent();
-
-                            plainCell(level, -5, -8);
-                            plainCell(level, 4, -8);
-                            plainCell(level, 1, -8);
-                            lavaCell(level, -2, -8);
-                            int fire =
-                                    placeTarget(
-                                            current,
-                                            "Fire",
-                                            new Vec3(-4.5, ARENA_Y, -7.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int lava =
-                                    placeTarget(
-                                            current,
-                                            "Lava",
-                                            new Vec3(-1.5, ARENA_Y, -7.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int poison =
-                                    placeTarget(
-                                            current,
-                                            "Poison",
-                                            new Vec3(1.5, ARENA_Y, -7.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int wither =
-                                    placeTarget(
-                                            current,
-                                            "Wither",
-                                            new Vec3(4.5, ARENA_Y, -7.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            living(current, fire).setRemainingFireTicks(400);
-                            living(current, poison)
-                                    .addEffect(new MobEffectInstance(MobEffects.POISON, 320, 0));
-                            living(current, wither)
-                                    .addEffect(new MobEffectInstance(MobEffects.WITHER, 400, 0));
-                            if (living(current, fire).getRemainingFireTicks() <= 0
-                                    || !living(current, poison).hasEffect(MobEffects.POISON)
-                                    || !living(current, wither).hasEffect(MobEffects.WITHER)) {
-                                throw new AssertionError(
-                                        "Expected to set fire, poison and wither on the effect targets");
-                            }
-                            return List.of(fire, lava, poison, wither);
-                        });
-        context.waitTicks(4);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -7.5));
-        // The numbers are on screen from the stage's first frame, not only after the first reading.
-        String starting =
-                server.computeOnServer(
-                        current ->
-                                healthLine(current, targets, "Fire", "Lava", "Poison", "Wither"));
-        ClientGameTestRecorder.showStep(
-                context, "showcase.effects-damage", "Fire, lava, poison, wither", starting);
-        for (int reading = 0; reading < 3; reading++) {
-            context.waitTicks(READING_TICKS);
-            String label =
-                    server.computeOnServer(
-                            current ->
-                                    healthLine(
-                                            current, targets, "Fire", "Lava", "Poison", "Wither"));
-            ClientGameTestRecorder.showStep(
-                    context, "showcase.effects-damage", "Fire, lava, poison, wither", label);
-            ClientGameTestRecorder.log(context, label);
-        }
-        assertHealthFell(server, targets, EFFECT_TARGET_HEALTH, "fire, lava, poison and wither");
-        closeStage(context, "showcase.effects-damage", 10);
-        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
+                new Vec3(0.0, ARENA_Y, -2.5),
+                new Vec3(0.0, ARENA_Y + 0.9, -7.5),
+                List.of("Fire", "Lava", "Poison", "Wither"),
+                Set.of(),
+                Set.of("Fire", "Poison", "Wither"),
+                (current, previous) -> {
+                    int fire = placeTarget(current, "Fire", new Vec3(-4.5, ARENA_Y, -7.5));
+                    int lava = placeTarget(current, "Lava", new Vec3(-1.5, ARENA_Y, -7.5));
+                    int poison = placeTarget(current, "Poison", new Vec3(1.5, ARENA_Y, -7.5));
+                    int wither = placeTarget(current, "Wither", new Vec3(4.5, ARENA_Y, -7.5));
+                    living(current, fire).setRemainingFireTicks(400);
+                    living(current, poison)
+                            .addEffect(new MobEffectInstance(MobEffects.POISON, 320, 0));
+                    living(current, wither)
+                            .addEffect(new MobEffectInstance(MobEffects.WITHER, 400, 0));
+                    if (living(current, fire).getRemainingFireTicks() <= 0
+                            || !living(current, poison).hasEffect(MobEffects.POISON)
+                            || !living(current, wither).hasEffect(MobEffects.WITHER)) {
+                        throw new AssertionError(
+                                "Expected to set fire, poison and wither on the effect targets");
+                    }
+                    return List.of(fire, lava, poison, wither);
+                });
     }
 
-    private static void recordFreezingAndContact(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.effects-contact",
-                "Freezing, cactus, drying",
-                "Powder snow, contact damage, a fish on land");
-        standAt(context, server, playerId, 0.5, -18.5, 180.0F);
-        List<Integer> targets =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            snowCell(level, -4, -24);
-                            cactusCell(level, 0, -24);
-                            plainCell(level, 4, -24);
-                            int freezing =
-                                    placeTarget(
-                                            current,
-                                            "Freezing",
-                                            new Vec3(-3.5, ARENA_Y, -23.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int cactus =
-                                    placeTarget(
-                                            current,
-                                            "Cactus",
-                                            new Vec3(0.85, ARENA_Y, -23.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int drying =
-                                    spawnMob(
+    private static EffectScene contactEffectsScene() {
+        return new EffectScene(
+                "effects-contact",
+                "Powder snow, cactus, fish on land",
+                new Vec3(0.5, ARENA_Y, -18.5),
+                new Vec3(0.5, ARENA_Y + 0.9, -23.5),
+                List.of("Freezing", "Cactus", "Drying"),
+                Set.of(),
+                Set.of(),
+                (current, previous) -> {
+                    int freezing = placeTarget(current, "Freezing", new Vec3(-3.5, ARENA_Y, -23.5));
+                    int cactus = placeTarget(current, "Cactus", new Vec3(0.85, ARENA_Y, -23.5));
+                    int drying =
+                            previous.isEmpty()
+                                    ? spawnMob(
                                             current,
                                             EntityTypes.COD,
                                             "Drying",
-                                            new Vec3(4.5, ARENA_Y, -23.5));
-                            living(current, drying)
-                                    .getAttribute(Attributes.MAX_HEALTH)
-                                    .setBaseValue(EFFECT_TARGET_HEALTH);
-                            living(current, drying).setHealth(EFFECT_TARGET_HEALTH);
-                            living(current, drying).setAirSupply(0);
-                            return List.of(freezing, cactus, drying);
-                        });
-        context.waitTicks(4);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -23.5));
-        // The numbers are on screen from the stage's first frame, not only after the first reading.
-        String starting =
-                server.computeOnServer(
-                        current -> healthLine(current, targets, "Freezing", "Cactus", "Drying"));
-        ClientGameTestRecorder.showStep(
-                context, "showcase.effects-contact", "Freezing, cactus, drying", starting);
-        for (int reading = 0; reading < 3; reading++) {
-            context.waitTicks(READING_TICKS);
-            String label =
-                    server.computeOnServer(
-                            current ->
-                                    healthLine(current, targets, "Freezing", "Cactus", "Drying"));
-            ClientGameTestRecorder.showStep(
-                    context, "showcase.effects-contact", "Freezing, cactus, drying", label);
-            ClientGameTestRecorder.log(context, label);
-        }
-        assertHealthFell(server, targets, EFFECT_TARGET_HEALTH, "freezing, cactus and drying");
-        closeStage(context, "showcase.effects-contact", 10);
-        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
+                                            new Vec3(4.5, ARENA_Y, -23.5))
+                                    : previous.get(2);
+                    LivingEntity fish = living(current, drying);
+                    fish.getAttribute(Attributes.MAX_HEALTH).setBaseValue(EFFECT_TARGET_HEALTH);
+                    fish.setHealth(EFFECT_TARGET_HEALTH);
+                    fish.setAirSupply(0);
+                    return List.of(freezing, cactus, drying);
+                });
     }
 
-    private static void recordHungerCloudAndHealing(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.effects-hunger",
-                "Hunger, a cloud, and healing",
-                "Starvation, a lingering cloud, self-healing");
-        standAt(context, server, playerId, 0.5, -34.5, 180.0F);
-        List<Integer> targets =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            plainCell(level, -4, -40);
-                            plainCell(level, 0, -40);
-                            plainCell(level, 4, -40);
-                            int starving =
-                                    placeTarget(
-                                            current,
-                                            "Starving",
-                                            new Vec3(-3.5, ARENA_Y, -39.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int regenerating =
-                                    placeTarget(
-                                            current,
-                                            "Regenerating",
-                                            new Vec3(0.5, ARENA_Y, -39.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            int clouded =
-                                    placeTarget(
-                                            current,
-                                            "Cloud",
-                                            new Vec3(4.5, ARENA_Y, -39.5),
-                                            EFFECT_TARGET_HEALTH,
-                                            true);
-                            ServerPlayer starvingPlayer = (ServerPlayer) living(current, starving);
-                            starvingPlayer.getFoodData().setFoodLevel(0);
-                            starvingPlayer.getFoodData().setSaturation(0.0F);
-                            ServerPlayer regeneratingPlayer =
-                                    (ServerPlayer) living(current, regenerating);
-                            regeneratingPlayer.setHealth(EFFECT_TARGET_HEALTH / 2.0F);
-                            regeneratingPlayer.getFoodData().setFoodLevel(20);
-                            regeneratingPlayer.getFoodData().setSaturation(0.0F);
+    private static EffectScene hungerEffectsScene() {
+        return new EffectScene(
+                "effects-hunger",
+                "Starving, healing, poison cloud",
+                new Vec3(0.5, ARENA_Y, -34.5),
+                new Vec3(0.5, ARENA_Y + 0.9, -39.5),
+                List.of("Starving", "Regenerating", "PoisonCloud"),
+                Set.of("Regenerating"),
+                Set.of(),
+                (current, previous) -> {
+                    ServerLevel level = current.overworld();
+                    int starving = placeTarget(current, "Starving", new Vec3(-3.5, ARENA_Y, -39.5));
+                    int regenerating =
+                            placeTarget(current, "Regenerating", new Vec3(0.5, ARENA_Y, -39.5));
+                    int clouded =
+                            placeTarget(current, "PoisonCloud", new Vec3(4.5, ARENA_Y, -39.5));
+                    ServerPlayer starvingPlayer = (ServerPlayer) living(current, starving);
+                    starvingPlayer.getFoodData().setFoodLevel(0);
+                    starvingPlayer.getFoodData().setSaturation(0.0F);
+                    // A full food bar with full saturation heals from saturation, one health per
+                    // heal, until the saturation runs out.
+                    ServerPlayer regeneratingPlayer = (ServerPlayer) living(current, regenerating);
+                    regeneratingPlayer.setHealth(EFFECT_TARGET_HEALTH / 2.0F);
+                    regeneratingPlayer.getFoodData().setFoodLevel(20);
+                    regeneratingPlayer.getFoodData().setSaturation(20.0F);
 
-                            AreaEffectCloud cloud = new AreaEffectCloud(level, 4.5, ARENA_Y, -39.5);
-                            cloud.setPotionContents(
-                                    new PotionContents(
-                                            Optional.of(Potions.POISON),
-                                            Optional.empty(),
-                                            List.of(),
-                                            Optional.empty()));
-                            cloud.setRadius(2.5F);
-                            cloud.setDuration(600);
-                            cloud.setWaitTime(0);
-                            level.addFreshEntity(cloud);
-                            return List.of(starving, regenerating, clouded);
-                        });
-        context.waitTicks(4);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(0.5, ARENA_Y + 0.9, -39.5));
-        // The numbers are on screen from the stage's first frame, not only after the first reading.
-        String starting =
-                server.computeOnServer(
-                        current ->
-                                healthLine(current, targets, "Starving", "Regenerating", "Cloud"));
-        ClientGameTestRecorder.showStep(
-                context, "showcase.effects-hunger", "Hunger, a cloud, and healing", starting);
-        float startingHealth =
-                server.computeOnServer(current -> living(current, targets.get(1)).getHealth());
-        for (int reading = 0; reading < 3; reading++) {
-            context.waitTicks(READING_TICKS);
-            String label =
-                    server.computeOnServer(
-                            current ->
-                                    healthLine(
-                                            current, targets, "Starving", "Regenerating", "Cloud"));
-            ClientGameTestRecorder.showStep(
-                    context, "showcase.effects-hunger", "Hunger, a cloud, and healing", label);
-            ClientGameTestRecorder.log(context, label);
-        }
-        assertHealthFell(
-                server,
-                List.of(targets.get(0), targets.get(2)),
-                EFFECT_TARGET_HEALTH,
-                "starvation and the lingering cloud");
-        float healing =
-                server.computeOnServer(current -> living(current, targets.get(1)).getHealth());
-        if (healing <= startingHealth) {
-            throw new AssertionError(
-                    "Expected hunger-based regeneration to heal the wounded target; health went from "
-                            + startingHealth
-                            + " to "
-                            + healing);
-        }
-        closeStage(context, "showcase.effects-hunger", 10);
-        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
+                    if (previous.size() > 3) {
+                        Entity oldCloud = level.getEntity(previous.get(3));
+                        if (oldCloud != null) {
+                            oldCloud.discard();
+                        }
+                    }
+                    AreaEffectCloud cloud = new AreaEffectCloud(level, 4.5, ARENA_Y, -39.5);
+                    cloud.setPotionContents(
+                            new PotionContents(
+                                    Optional.of(Potions.POISON),
+                                    Optional.empty(),
+                                    List.of(),
+                                    Optional.empty()));
+                    cloud.setRadius(2.5F);
+                    cloud.setDuration(600);
+                    cloud.setWaitTime(0);
+                    level.addFreshEntity(cloud);
+                    return List.of(starving, regenerating, clouded, cloud.getId());
+                });
     }
 
-    /// The same three damage effects with the rule off, filmed because the numbers barely move: the
-    /// comparison is what shows "ten times faster".
-    private static void recordEffectsOff(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        openStage(
-                context,
-                "showcase.effects-off",
-                "The same effects, rule off",
-                "Vanilla: barely a scratch in two seconds");
-        standAt(context, server, playerId, 0.5, -2.5, 180.0F);
-        List<Integer> targets =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            level.getGameRules()
-                                    .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
-                            plainCell(level, -5, -8);
-                            plainCell(level, -2, -8);
-                            plainCell(level, 1, -8);
-                            int fire =
-                                    placeTarget(
-                                            current,
-                                            "FireOff",
-                                            new Vec3(-4.5, ARENA_Y, -7.5),
-                                            COMPARISON_TARGET_HEALTH,
-                                            true);
-                            int poison =
-                                    placeTarget(
-                                            current,
-                                            "PoisonOff",
-                                            new Vec3(-1.5, ARENA_Y, -7.5),
-                                            COMPARISON_TARGET_HEALTH,
-                                            true);
-                            int wither =
-                                    placeTarget(
-                                            current,
-                                            "WitherOff",
-                                            new Vec3(1.5, ARENA_Y, -7.5),
-                                            COMPARISON_TARGET_HEALTH,
-                                            true);
-                            living(current, fire).setRemainingFireTicks(400);
-                            living(current, poison)
-                                    .addEffect(new MobEffectInstance(MobEffects.POISON, 320, 0));
-                            living(current, wither)
-                                    .addEffect(new MobEffectInstance(MobEffects.WITHER, 400, 0));
-                            return List.of(fire, poison, wither);
-                        });
-        context.waitTicks(4);
-        ClientGameTestPlayerActions.lookAt(context, new Vec3(-1.5, ARENA_Y + 0.9, -7.5));
-        // The numbers are on screen from the stage's first frame, not only after the first reading.
-        String starting =
-                server.computeOnServer(
-                        current ->
-                                healthLine(current, targets, "FireOff", "PoisonOff", "WitherOff"));
-        ClientGameTestRecorder.showStep(
-                context, "showcase.effects-off", "The same effects, rule off", starting);
-        float[] start =
-                server.computeOnServer(
-                        current ->
-                                new float[] {
-                                    living(current, targets.get(0)).getHealth(),
-                                    living(current, targets.get(1)).getHealth(),
-                                    living(current, targets.get(2)).getHealth()
-                                });
-        for (int reading = 0; reading < 3; reading++) {
-            context.waitTicks(READING_TICKS);
-            String label =
-                    server.computeOnServer(
-                            current ->
-                                    healthLine(
-                                            current, targets, "FireOff", "PoisonOff", "WitherOff"));
-            ClientGameTestRecorder.showStep(
-                    context, "showcase.effects-off", "The same effects, rule off", label);
-            ClientGameTestRecorder.log(context, label);
-        }
-        float[] end =
-                server.computeOnServer(
-                        current ->
-                                new float[] {
-                                    living(current, targets.get(0)).getHealth(),
-                                    living(current, targets.get(1)).getHealth(),
-                                    living(current, targets.get(2)).getHealth()
-                                });
-        for (int index = 0; index < start.length; index++) {
-            if (start[index] - end[index] > 4.0F) {
-                throw new AssertionError(
-                        "Expected vanilla effect ticking to take at most four health in three readings; target "
-                                + index
-                                + " fell from "
-                                + start[index]
-                                + " to "
-                                + end[index]);
-            }
-        }
-        closeStage(context, "showcase.effects-off", 10);
-        server.runOnServer(current -> targets.forEach(target -> parkTarget(current, target)));
-    }
-
-    /// The negative cases the owner asked for, run after the film ends: every positive stage above
-    /// has the same actions with the rule off, where vanilla rejects the repeat hit.
-    private static void assertNegativeCases(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Melee: the same hits, rule off", "first hit");
-        int meleeTarget =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            GameRules rules = level.getGameRules();
-                            rules.set(ModGameRules.DISABLE_IFRAMES, false, current);
-                            rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, false, current);
-                            rules.set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
-                            ServerPlayer player = player(current, playerId);
-                            giveSword(player);
-                            player.teleportTo(
-                                    level, 0.5, ARENA_Y, 1.5, Set.of(), 0.0F, 0.0F, false);
-                            return placeTarget(
-                                    current,
-                                    "MeleeDummyOff",
-                                    new Vec3(0.5, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(4);
-        strikeRepeatedly(
-                context,
-                server,
-                playerId,
-                meleeTarget,
-                2,
-                false,
-                false,
-                true,
-                "showcase.negatives",
-                "Melee: the same hits, rule off");
-        server.runOnServer(current -> parkTarget(current, meleeTarget));
-
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Bow: the same arrows, rule off", "first shot");
-        int bowTarget =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, false);
-                            ServerPlayer player = player(current, playerId);
-                            player.getInventory().setItem(0, new ItemStack(Items.BOW));
-                            player.getInventory().setItem(8, new ItemStack(Items.ARROW, 32));
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "BowDummyOff",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(4);
-        shootRepeatedly(
-                context,
-                server,
-                playerId,
-                bowTarget,
-                2,
-                false,
-                true,
-                "showcase.negatives",
-                "Bow: the same arrows, rule off");
-        server.runOnServer(current -> parkTarget(current, bowTarget));
-
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Crossbow: the same bolts, rule off", "first shot");
-        int crossbowTarget =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, false);
-                            ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 2; slot++) {
-                                player.getInventory()
-                                        .setItem(slot, loadedCrossbow(new ItemStack(Items.ARROW)));
-                            }
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "CrossbowDummyOff",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(4);
-        shootLoadedCrossbowsVanilla(
-                context,
-                server,
-                playerId,
-                crossbowTarget,
-                2,
-                false,
-                "Crossbow: the same bolts, rule off");
-        server.runOnServer(current -> parkTarget(current, crossbowTarget));
-
-        ClientGameTestCommands.clearChat(context);
-        ClientGameTestRecorder.showStep(
-                context, "showcase.negatives", "Trident: the same throws, rule off", "first shot");
-        int tridentTarget =
-                server.computeOnServer(
-                        current -> {
-                            prepareShooter(current, playerId, false);
-                            ServerPlayer player = player(current, playerId);
-                            for (int slot = 0; slot < 2; slot++) {
-                                player.getInventory().setItem(slot, new ItemStack(Items.TRIDENT));
-                            }
-                            player.getInventory().setSelectedSlot(0);
-                            return placeTarget(
-                                    current,
-                                    "TridentDummyOff",
-                                    new Vec3(RANGE_X, ARENA_Y, 4.5),
-                                    WEAPON_TARGET_HEALTH,
-                                    true);
-                        });
-        context.waitTicks(4);
-        shootLoadedCrossbowsVanilla(
-                context,
-                server,
-                playerId,
-                tridentTarget,
-                2,
-                true,
-                "Trident: the same throws, rule off");
-        server.runOnServer(current -> parkTarget(current, tridentTarget));
-
-        assertVanillaEffectsSlow(context, server);
-        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-    }
-
-    /// Two shots with the rule off: the first lands, and the second lands at most what the first
-    /// did, never in full. Aimed once, so both shots fall inside one vanilla window.
-    private static void shootLoadedCrossbowsVanilla(
+    /// One effect scenario: about two seconds with faster_effect_ticking and disable_i_frames off,
+    /// then the same targets with fresh health and the same effects with both rules on. Every
+    /// target loses more health (a healer gains more) with the rules on than with them off.
+    private static void recordEffectScene(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
-            int targetId,
-            int shots,
-            boolean holdUse,
-            String title) {
-        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        float firstDrop = 0.0F;
-        ClientGameTestPlayerActions.lookAt(context, chest(server, targetId));
-        float previous = server.computeOnServer(current -> living(current, targetId).getHealth());
-        for (int shot = 1; shot <= shots; shot++) {
-            int hotbarSlot = shot - 1;
-            context.getInput().pressKey(options -> options.keyHotbarSlots[hotbarSlot]);
-            context.waitTicks(1);
-            if (holdUse) {
-                context.getInput().holdKeyFor(options -> options.keyUse, 1);
-            } else {
-                context.getInput().pressKey(options -> options.keyUse);
+            EffectScene scene) {
+        enterScene(context, server, playerId, scene.stand(), scene.view());
+        server.runOnServer(current -> player(current, playerId).getInventory().clearContent());
+        int count = scene.names().size();
+        float[][] change = new float[2][count];
+        List<Integer> targets = List.of();
+        for (int half = 0; half < 2; half++) {
+            boolean rulesOn = half == 1;
+            String stage = "showcase." + scene.id() + "-" + (rulesOn ? "on" : "off");
+            String title =
+                    scene.subject() + ", effect and i-frame rules " + (rulesOn ? "on" : "off");
+            openStage(context, stage, title, "");
+            List<Integer> previous = targets;
+            targets =
+                    server.computeOnServer(
+                            current -> {
+                                setEffectRules(current, rulesOn);
+                                return scene.setup().place(current, previous);
+                            });
+            List<Integer> shown = targets.subList(0, count);
+            float[] start = healths(server, shown);
+            String starting = server.computeOnServer(current -> healthLine(current, shown, scene));
+            ClientGameTestRecorder.showStep(context, stage, title, starting);
+            System.out.println("AD_CURVE " + stage + " 0 ticks: " + starting);
+            for (int reading = 1; reading <= 3; reading++) {
+                context.waitTicks(READING_TICKS);
+                String label = server.computeOnServer(current -> healthLine(current, shown, scene));
+                ClientGameTestRecorder.showStep(context, stage, title, label);
+                System.out.println(
+                        "AD_CURVE " + stage + " " + reading * READING_TICKS + " ticks: " + label);
             }
-            context.waitTicks(4);
-            float health = server.computeOnServer(current -> living(current, targetId).getHealth());
-            float drop = previous - health;
-            ClientGameTestRecorder.showStep(
-                    context,
-                    "showcase.negatives",
-                    title,
-                    "shot " + shot + ", health " + health(health));
-            ClientGameTestRecorder.log(
-                    context, "rule off shot " + shot + "  target health " + health);
-            if (shot == 1) {
-                if (drop <= 0.0F) {
-                    throw new AssertionError(
-                            "Expected the first vanilla shot to damage the target; health stayed at "
-                                    + health);
-                }
-                firstDrop = drop;
-            } else if (drop >= firstDrop) {
-                throw new AssertionError(
-                        "Expected vanilla invincibility to keep shot "
-                                + shot
-                                + " from landing in full; it took "
-                                + drop
-                                + " of the first hit's "
-                                + firstDrop);
+            float[] end = healths(server, shown);
+            for (int index = 0; index < count; index++) {
+                change[half][index] = end[index] - start[index];
             }
-            previous = health;
+            closeStage(context, stage, 4);
         }
-    }
-
-    private static void assertVanillaEffectsSlow(
-            ClientGameTestContext context, TestDedicatedServerContext server) {
-        int target =
-                server.computeOnServer(
-                        current -> {
-                            ServerLevel level = current.overworld();
-                            level.getGameRules()
-                                    .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
-                            plainCell(level, 0, 4);
-                            int slow =
-                                    spawnMob(
-                                            current,
-                                            EntityTypes.ZOMBIE,
-                                            "SlowDummy",
-                                            new Vec3(0.5, ARENA_Y, 3.5));
-                            LivingEntity living = living(current, slow);
-                            living.setHealth(living.getMaxHealth());
-                            living.setRemainingFireTicks(400);
-                            living.addEffect(new MobEffectInstance(MobEffects.POISON, 400, 2));
-                            return slow;
-                        });
-        // Two ticks for the join line, then the same twenty ticks of vanilla ticking the health
-        // check
-        // expects: a longer window lets the fire reach its 20-tick damage tick.
-        context.waitTicks(2);
-        ClientGameTestCommands.clearChat(context);
-        context.waitTicks(18);
-        float health = server.computeOnServer(current -> living(current, target).getHealth());
+        List<Integer> finished = targets;
         server.runOnServer(
                 current -> {
-                    parkTarget(current, target);
-                    restoreRules(current);
+                    setEffectRules(current, false);
+                    finished.forEach(target -> parkTarget(current, target));
                 });
-        if (health < 17.0F) {
-            throw new AssertionError(
-                    "Expected vanilla fire and poison to deal little damage in twenty ticks, health was "
-                            + health);
-        }
-        ClientGameTestRecorder.log(context, "rule off: health after twenty ticks " + health);
+        assertEffectsAccelerated(scene, change);
     }
 
-    /// One no-AI mob, for a fish out of water and for the vanilla comparison.
+    private static void assertEffectsAccelerated(EffectScene scene, float[][] change) {
+        for (int index = 0; index < scene.names().size(); index++) {
+            String name = scene.names().get(index);
+            boolean heals = scene.healers().contains(name);
+            float off = heals ? change[0][index] : -change[0][index];
+            float on = heals ? change[1][index] : -change[1][index];
+            if (on <= 0.0F || on <= off) {
+                throw new AssertionError(
+                        "Expected "
+                                + name
+                                + " to "
+                                + (heals ? "heal" : "lose health")
+                                + " faster with the rules on: "
+                                + off
+                                + " with them off, "
+                                + on
+                                + " with them on");
+            }
+            if (scene.slowInVanilla().contains(name) && off > 4.0F) {
+                throw new AssertionError(
+                        "Expected vanilla effect ticking to take at most four health from "
+                                + name
+                                + " in three readings, it took "
+                                + off);
+            }
+        }
+    }
+
+    private static float[] healths(TestDedicatedServerContext server, List<Integer> targets) {
+        return server.computeOnServer(
+                current -> {
+                    float[] values = new float[targets.size()];
+                    for (int index = 0; index < values.length; index++) {
+                        values[index] = living(current, targets.get(index)).getHealth();
+                    }
+                    return values;
+                });
+    }
+
+    /// One no-AI mob, for a fish out of water.
     private static int spawnMob(
             MinecraftServer server, EntityType<? extends Mob> type, String name, Vec3 position) {
         ServerLevel level = server.overworld();
@@ -1561,40 +1248,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return target.getId();
     }
 
-    /// One caption line holding the health of every target of the stage, in the order the stage
-    /// names them.
+    /// One caption line holding the health of every target of the scenario, in the order the
+    /// scenario names them.
     private static String healthLine(
-            MinecraftServer server, List<Integer> targets, String... names) {
+            MinecraftServer server, List<Integer> targets, EffectScene scene) {
         StringBuilder line = new StringBuilder();
         for (int index = 0; index < targets.size(); index++) {
             LivingEntity target = living(server, targets.get(index));
             if (line.length() > 0) {
                 line.append("   ");
             }
-            line.append(names[index])
+            line.append(scene.names().get(index))
                     .append(' ')
                     .append(Math.round(Math.max(0.0F, target.getHealth())));
         }
         return line.toString();
-    }
-
-    /// Every target of an accelerated stage loses health: each effect family has to be seen
-    /// working.
-    private static void assertHealthFell(
-            TestDedicatedServerContext server, List<Integer> targets, float start, String family) {
-        for (int index = 0; index < targets.size(); index++) {
-            int target = targets.get(index);
-            float health = server.computeOnServer(current -> living(current, target).getHealth());
-            if (health >= start) {
-                throw new AssertionError(
-                        "Expected accelerated damage from "
-                                + family
-                                + " to take health off target "
-                                + index
-                                + "; health stayed at "
-                                + health);
-            }
-        }
     }
 
     private static void plainCell(ServerLevel level, int x, int z) {
@@ -1622,6 +1290,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void cactusCell(ServerLevel level, int x, int z) {
         setBlock(level, x, ARENA_Y - 1, z, Blocks.STONE);
+        setBlock(level, x + 1, ARENA_Y - 2, z, Blocks.STONE);
         setBlock(level, x + 1, ARENA_Y - 1, z, Blocks.SAND);
         setBlock(level, x + 1, ARENA_Y, z, Blocks.CACTUS);
     }
@@ -1654,76 +1323,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return rocket;
     }
 
-    private static String describeTarget(MinecraftServer server, int targetId, int playerId) {
-        LivingEntity target = living(server, targetId);
-        ServerPlayer player = player(server, playerId);
-        StringBuilder state = new StringBuilder();
-        state.append("target=")
-                .append(target.getType())
-                .append(" health=")
-                .append(target.getHealth())
-                .append(" invulnerable=")
-                .append(target.isInvulnerable())
-                .append(" cooldown=")
-                .append(target.damageCooldownTime)
-                .append(" hurtTime=")
-                .append(target.hurtTime)
-                .append(" lastSource=")
-                .append(target.getLastDamageSource())
-                .append(" mode=")
-                .append(
-                        target instanceof ServerPlayer targetPlayer
-                                ? targetPlayer.gameMode()
-                                : null)
-                .append(" targetAbilitiesInvulnerable=")
-                .append(
-                        target instanceof net.minecraft.world.entity.player.Player targetPlayer
-                                ? targetPlayer.getAbilities().invulnerable
-                                : null)
-                .append(" playerMode=")
-                .append(player.gameMode())
-                .append(" playerAbilitiesInvulnerable=")
-                .append(player.getAbilities().invulnerable)
-                .append(" attackScale=")
-                .append(player.getAttackStrengthScale(0.5F))
-                .append(" distance=")
-                .append(Math.sqrt(target.getBoundingBox().distanceToSqr(player.getEyePosition())))
-                .append(" attackDamage=")
-                .append(player.getAttributeValue(Attributes.ATTACK_DAMAGE))
-                .append(" withinAttackRange=")
-                .append(
-                        player.isWithinAttackRange(
-                                player.getMainHandItem(), target.getBoundingBox(), 3.0))
-                .append(" cannotAttackWithItem=")
-                .append(player.cannotAttackWithItem(player.getMainHandItem(), 5))
-                .append(" held=")
-                .append(player.getMainHandItem())
-                .append(" probeInvulnerableTo=")
-                .append(
-                        target.isInvulnerableTo(
-                                server.overworld(),
-                                server.overworld().damageSources().playerAttack(player)))
-                .append(" isRemoved=")
-                .append(target.isRemoved())
-                .append(" removalReason=")
-                .append(target.getRemovalReason())
-                .append(" temporarilyInvulnerable=")
-                .append(target.isTemporarilyInvulnerable())
-                .append(" playerHealth=")
-                .append(player.getHealth())
-                .append(" playerDead=")
-                .append(player.isDeadOrDying())
-                .append(" playerAir=")
-                .append(player.getAirSupply())
-                .append(" pvpRule=")
-                .append(server.overworld().getGameRules().get(GameRules.PVP))
-                .append(" canHarmPlayer=")
-                .append(
-                        target instanceof ServerPlayer targetPlayer
-                                && targetPlayer.canHarmPlayer(player));
-        return state.toString();
-    }
-
     private static void giveSword(ServerPlayer player) {
         player.getInventory().clearContent();
         player.getInventory().setSelectedSlot(0);
@@ -1731,9 +1330,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// One decimal for every health figure the caption prints, so a rocket's fractional damage
-    /// reads like the other stages' numbers.
+    /// reads like the other scenarios' numbers.
     private static String health(float value) {
-        return String.format(java.util.Locale.ROOT, "%.1f", value);
+        return String.format(Locale.ROOT, "%.1f", value);
     }
 
     private static Vec3 chest(TestDedicatedServerContext server, int entityId) {
@@ -1766,10 +1365,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// Connects a player-shaped, survival target the way a vanilla GameTest does, so the vanilla
-    /// client renders it as a player the mod's damage applies to. A weapon target keeps enough
-    /// health to outlive its stage; its food level sits below the regeneration threshold and above
-    /// starvation, so its health only changes when something hits it. Creates a dummy once, parked
-    /// high above the arena, and remembers its id.
+    /// client renders it as a player the mod's damage applies to. Its food level sits below the
+    /// regeneration threshold and above starvation, so its health only changes when something hits
+    /// it. Creates a dummy once, parked high above the arena, and remembers its id.
     private static void createDummy(MinecraftServer server, String name) {
         ServerLevel level = server.overworld();
         CommonListenerCookie cookie =
@@ -1795,39 +1393,43 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, PARKING));
     }
 
-    /// Moves a pre-created dummy to its stage position with a fresh health pool, and pins it there
-    /// when the stage must not let knockback move it.
+    /// An effect target: pinned in its cell with full effect-target health, facing the camera.
+    private static int placeTarget(MinecraftServer server, String name, Vec3 position) {
+        return placeTarget(server, name, position, EFFECT_TARGET_HEALTH, 0.0F);
+    }
+
+    /// Moves a pre-created dummy to its scenario position with a fresh health pool, facing the
+    /// given way, and pins it there so knockback cannot move it out of the shot.
     private static int placeTarget(
-            MinecraftServer server, String name, Vec3 position, float health, boolean pinned) {
+            MinecraftServer server, String name, Vec3 position, float health, float yaw) {
         Integer id = DUMMIES.get(name);
         if (id == null) {
             throw new AssertionError("Expected the dummy " + name + " to exist");
         }
+        resetTarget(server, id, health);
         ServerPlayer target = player(server, id);
+        target.teleportTo(
+                server.overworld(), position.x, position.y, position.z, Set.of(), yaw, 0.0F, false);
+        TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, position));
+        return id;
+    }
+
+    /// Gives a dummy a fresh health pool and clears what the last half left on it: fire, frost,
+    /// effects and stuck arrows.
+    private static void resetTarget(MinecraftServer server, int targetId, float health) {
+        ServerPlayer target = player(server, targetId);
         target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(health);
         target.setHealth(health);
         target.getFoodData().setFoodLevel(17);
         target.getFoodData().setSaturation(0.0F);
         target.setRemainingFireTicks(0);
         target.setTicksFrozen(0);
+        target.setArrowCount(0);
         target.removeAllEffects();
-        target.teleportTo(
-                server.overworld(),
-                position.x,
-                position.y,
-                position.z,
-                Set.of(),
-                180.0F,
-                0.0F,
-                false);
-        TRACKED.put(
-                target.getUUID(),
-                new TrackedTarget(target.getUUID(), name, pinned ? position : null));
-        return id;
     }
 
-    /// Sends a dummy back to the parking spot so the next stage's shot is clean; a mob is
-    /// discarded.
+    /// Sends a dummy back to the parking spot so the next scenario's shot is clean; any other
+    /// entity is discarded.
     private static void parkTarget(MinecraftServer server, int entityId) {
         Entity target = server.overworld().getEntity(entityId);
         if (target instanceof ServerPlayer player) {
@@ -1840,6 +1442,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             .findFirst()
                             .orElse("");
             player.removeAllEffects();
+            player.setRemainingFireTicks(0);
             player.setHealth(player.getMaxHealth());
             player.teleportTo(
                     server.overworld(),
@@ -1859,6 +1462,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void restoreState(MinecraftServer server) {
         restoreRules(server);
         TRACKED.clear();
+        hitLog = null;
         for (ServerPlayer player : List.copyOf(server.getPlayerList().getPlayers())) {
             if (player.getCustomName() != null) {
                 server.getPlayerList().remove(player);
