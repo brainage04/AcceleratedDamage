@@ -30,6 +30,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
@@ -42,6 +43,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -105,6 +107,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// An effect target is healthy enough to keep showing numbers for the whole scenario.
     private static final float EFFECT_TARGET_HEALTH = 300.0F;
 
+    /// Effect targets face +Z, towards the camera south of their row.
+    private static final float EFFECT_TARGET_YAW = 0.0F;
+
     private static final int READING_TICKS = 14;
 
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
@@ -129,27 +134,55 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// A filmed half lasts about two seconds.
     private static final int HALF_TICKS = 40;
 
-    /// Where an off-stage dummy waits: far above the arena and outside every camera's view.
-    private static final Vec3 PARKING = new Vec3(0.5, 200.0, 0.5);
+    /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
+    /// placed in a scene is a new entity on the client, its body built facing the rotation sent
+    /// with it (LivingEntity.recreateFromPacket, LivingEntity.java:4009 in the 26.3 sources; see
+    /// createDummy). A dummy moved while in view keeps the body turn of that move instead
+    /// (LivingEntity.java:2791-2812), so it would face away from the camera or stand sideways.
+    private static final Vec3 PARKING = new Vec3(0.5, 200.0, 400.5);
+
+    /// Ticks a scene's targets are in place before its marker, so flames, effect particles and the
+    /// poison cloud are already drawn on the stage's first frame.
+    private static final int SCENE_SETTLE_TICKS = 10;
+
+    /// How far a player-shaped target's body and head may turn from its server yaw.
+    private static final float YAW_TOLERANCE_DEGREES = 10.0F;
+
+    /// How far a target's yaw may point from the camera: the outer targets of a row stand up to 42
+    /// degrees off the camera's line of sight.
+    private static final float CAMERA_TOLERANCE_DEGREES = 50.0F;
 
     /// Every dummy is created before the client joins, so no join line can ever reach a filmed
-    /// frame.
-    private static final List<String> DUMMY_NAMES =
-            List.of(
-                    "MeleeDummy",
-                    "BowDummy",
-                    "CrossbowDummy",
-                    "FireworkDummy",
-                    "TridentDummy",
-                    "Fire",
-                    "Lava",
-                    "Poison",
-                    "Wither",
-                    "Freezing",
-                    "Cactus",
-                    "Starving",
-                    "Regenerating",
-                    "PoisonCloud");
+    /// frame. Each one always faces the same way, parked or shown: the weapon dummies face the
+    /// player north of them, the effect dummies face the camera south of them.
+    private static final Map<String, Float> DUMMY_YAWS = dummyYaws();
+
+    private static Map<String, Float> dummyYaws() {
+        Map<String, Float> yaws = new LinkedHashMap<>();
+        for (String name :
+                List.of(
+                        "MeleeDummy",
+                        "BowDummy",
+                        "CrossbowDummy",
+                        "FireworkDummy",
+                        "TridentDummy")) {
+            yaws.put(name, 180.0F);
+        }
+        for (String name :
+                List.of(
+                        "Fire",
+                        "Lava",
+                        "Poison",
+                        "Wither",
+                        "Freezing",
+                        "Cactus",
+                        "Starving",
+                        "Regenerating",
+                        "PoisonCloud")) {
+            yaws.put(name, EFFECT_TARGET_YAW);
+        }
+        return yaws;
+    }
 
     private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
 
@@ -278,6 +311,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         List<Integer> place(MinecraftServer server, List<Integer> previous);
     }
 
+    /// What a scene starts at its marker: the timers its curve is measured from.
+    @FunctionalInterface
+    private interface EffectStart {
+        void begin(MinecraftServer server, List<Integer> targets);
+    }
+
     /// One effect scenario: its targets' names in caption order, which of them heal instead of
     /// taking damage, and which of them vanilla may hurt by at most four health in a half.
     private record EffectScene(
@@ -288,7 +327,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             List<String> names,
             Set<String> healers,
             Set<String> slowInVanilla,
-            EffectSetup setup) {}
+            EffectSetup setup,
+            EffectStart start) {}
+
+    /// A target the client must show in place: player-shaped ones also face the camera.
+    private record ShotTarget(int id, String label, Vec3 position, float yaw, boolean faces) {}
 
     @Override
     public void runTest(ClientGameTestContext context) {
@@ -533,7 +576,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
         // Every dummy joins here, before the client connects: a join line that is broadcast while
         // nobody is connected can never appear in a recorded frame.
-        for (String name : DUMMY_NAMES) {
+        for (String name : DUMMY_YAWS.keySet()) {
             createDummy(server, name);
         }
     }
@@ -628,11 +671,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         current -> {
                             giveSword(player(current, playerId));
                             return placeTarget(
-                                    current,
-                                    "MeleeDummy",
-                                    MELEE_TARGET,
-                                    WEAPON_TARGET_HEALTH,
-                                    180.0F);
+                                    current, "MeleeDummy", MELEE_TARGET, WEAPON_TARGET_HEALTH);
                         });
         // Aim at the neck rather than the middle of the body: the name tag above the head then
         // sits near the middle of the frame instead of under the caption panel.
@@ -686,11 +725,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     .getGameRules()
                                     .set(ModGameRules.INSTANT_SHOOT, true, current);
                             return placeTarget(
-                                    current,
-                                    "BowDummy",
-                                    RANGE_TARGET,
-                                    WEAPON_TARGET_HEALTH,
-                                    180.0F);
+                                    current, "BowDummy", RANGE_TARGET, WEAPON_TARGET_HEALTH);
                         });
         enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
@@ -743,7 +778,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     .set(ModGameRules.INSTANT_SHOOT, true, current);
                             fillHotbar(player(current, playerId), weapon);
                             return placeTarget(
-                                    current, dummy, targetPosition, WEAPON_TARGET_HEALTH, 180.0F);
+                                    current, dummy, targetPosition, WEAPON_TARGET_HEALTH);
                         });
         enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
@@ -1052,19 +1087,27 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     int lava = placeTarget(current, "Lava", new Vec3(-1.5, ARENA_Y, -7.5));
                     int poison = placeTarget(current, "Poison", new Vec3(1.5, ARENA_Y, -7.5));
                     int wither = placeTarget(current, "Wither", new Vec3(4.5, ARENA_Y, -7.5));
-                    living(current, fire).setRemainingFireTicks(400);
-                    living(current, poison)
-                            .addEffect(new MobEffectInstance(MobEffects.POISON, 320, 0));
-                    living(current, wither)
-                            .addEffect(new MobEffectInstance(MobEffects.WITHER, 400, 0));
-                    if (living(current, fire).getRemainingFireTicks() <= 0
-                            || !living(current, poison).hasEffect(MobEffects.POISON)
-                            || !living(current, wither).hasEffect(MobEffects.WITHER)) {
-                        throw new AssertionError(
-                                "Expected to set fire, poison and wither on the effect targets");
-                    }
-                    return List.of(fire, lava, poison, wither);
-                });
+                    List<Integer> targets = List.of(fire, lava, poison, wither);
+                    setDamageEffects(current, targets);
+                    return targets;
+                },
+                AcceleratedDamageClientGameTest::setDamageEffects);
+    }
+
+    /// Sets fire, poison and wither on the fire, poison and wither targets with full durations.
+    private static void setDamageEffects(MinecraftServer server, List<Integer> targets) {
+        LivingEntity fire = living(server, targets.get(0));
+        LivingEntity poison = living(server, targets.get(2));
+        LivingEntity wither = living(server, targets.get(3));
+        fire.setRemainingFireTicks(400);
+        poison.addEffect(new MobEffectInstance(MobEffects.POISON, 320, 0));
+        wither.addEffect(new MobEffectInstance(MobEffects.WITHER, 400, 0));
+        if (fire.getRemainingFireTicks() <= 0
+                || !poison.hasEffect(MobEffects.POISON)
+                || !wither.hasEffect(MobEffects.WITHER)) {
+            throw new AssertionError(
+                    "Expected to set fire, poison and wither on the effect targets");
+        }
     }
 
     private static EffectScene contactEffectsScene() {
@@ -1092,6 +1135,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     fish.setHealth(EFFECT_TARGET_HEALTH);
                     fish.setAirSupply(0);
                     return List.of(freezing, cactus, drying);
+                },
+                (current, targets) -> {
+                    living(current, targets.get(0)).setTicksFrozen(0);
+                    living(current, targets.get(2)).setAirSupply(0);
                 });
     }
 
@@ -1111,15 +1158,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             placeTarget(current, "Regenerating", new Vec3(0.5, ARENA_Y, -39.5));
                     int clouded =
                             placeTarget(current, "PoisonCloud", new Vec3(4.5, ARENA_Y, -39.5));
-                    ServerPlayer starvingPlayer = (ServerPlayer) living(current, starving);
-                    starvingPlayer.getFoodData().setFoodLevel(0);
-                    starvingPlayer.getFoodData().setSaturation(0.0F);
-                    // A full food bar with full saturation heals from saturation, one health per
-                    // heal, until the saturation runs out.
-                    ServerPlayer regeneratingPlayer = (ServerPlayer) living(current, regenerating);
-                    regeneratingPlayer.setHealth(EFFECT_TARGET_HEALTH / 2.0F);
-                    regeneratingPlayer.getFoodData().setFoodLevel(20);
-                    regeneratingPlayer.getFoodData().setSaturation(20.0F);
+                    // Saturation and hunger start at the marker; until then the targets keep the
+                    // dummies' 17 food, at which neither healing nor starving runs (FoodData.java:
+                    // 45-60 in the 26.3 sources).
+                    living(current, regenerating).setHealth(EFFECT_TARGET_HEALTH / 2.0F);
 
                     if (previous.size() > 3) {
                         Entity oldCloud = level.getEntity(previous.get(3));
@@ -1139,12 +1181,33 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     cloud.setWaitTime(0);
                     level.addFreshEntity(cloud);
                     return List.of(starving, regenerating, clouded, cloud.getId());
+                },
+                (current, targets) -> {
+                    ServerPlayer starving = player(current, targets.get(0));
+                    starving.getFoodData().setFoodLevel(0);
+                    starving.getFoodData().setSaturation(0.0F);
+                    // A full food bar with full saturation heals from saturation, one health per
+                    // heal, until the saturation runs out.
+                    ServerPlayer regenerating = player(current, targets.get(1));
+                    regenerating.getFoodData().setFoodLevel(20);
+                    regenerating.getFoodData().setSaturation(20.0F);
+                    // The cloud ends once its age passes its duration (AreaEffectCloud.java:191),
+                    // so it gets its full duration again from the marker.
+                    Entity cloud = current.overworld().getEntity(targets.get(3));
+                    if (!(cloud instanceof AreaEffectCloud poisonCloud)) {
+                        throw new AssertionError("Expected the poison cloud to exist");
+                    }
+                    poisonCloud.setDuration(poisonCloud.tickCount + 600);
                 });
     }
 
     /// One effect scenario: about two seconds with faster_effect_ticking and disable_i_frames off,
     /// then the same targets with fresh health and the same effects with both rules on. Every
     /// target loses more health (a healer gains more) with the rules on than with them off.
+    ///
+    /// Each half's targets, effects and cloud are in place, shown by the client and facing the
+    /// camera before the half's marker. Until the marker the targets are invulnerable, so every
+    /// curve still starts from full health at the marker.
     private static void recordEffectScene(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
@@ -1160,18 +1223,38 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             String stage = "showcase." + scene.id() + "-" + (rulesOn ? "on" : "off");
             String title =
                     scene.subject() + ", effect and i-frame rules " + (rulesOn ? "on" : "off");
-            openStage(context, stage, title, "");
             List<Integer> previous = targets;
             targets =
                     server.computeOnServer(
                             current -> {
                                 setEffectRules(current, rulesOn);
-                                return scene.setup().place(current, previous);
+                                List<Integer> ids = scene.setup().place(current, previous);
+                                ids.forEach(
+                                        id -> entity(current, id).setPermanentlyInvulnerable(true));
+                                return ids;
                             });
+            List<Integer> placed = targets;
             List<Integer> shown = targets.subList(0, count);
-            float[] start = healths(server, shown);
+            List<ShotTarget> shot = shotTargets(server, placed);
+            waitForShot(context, stage, shot);
+            context.waitTicks(SCENE_SETTLE_TICKS);
+            requireShot(context, stage, "at its marker", shot);
             String starting = server.computeOnServer(current -> healthLine(current, shown, scene));
-            ClientGameTestRecorder.showStep(context, stage, title, starting);
+            openStage(context, stage, title, starting);
+            float[] start =
+                    server.computeOnServer(
+                            current -> {
+                                placed.forEach(
+                                        id ->
+                                                entity(current, id)
+                                                        .setPermanentlyInvulnerable(false));
+                                scene.start().begin(current, placed);
+                                float[] values = new float[count];
+                                for (int index = 0; index < count; index++) {
+                                    values[index] = living(current, shown.get(index)).getHealth();
+                                }
+                                return values;
+                            });
             System.out.println("AD_CURVE " + stage + " 0 ticks: " + starting);
             for (int reading = 1; reading <= 3; reading++) {
                 context.waitTicks(READING_TICKS);
@@ -1179,6 +1262,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 ClientGameTestRecorder.showStep(context, stage, title, label);
                 System.out.println(
                         "AD_CURVE " + stage + " " + reading * READING_TICKS + " ticks: " + label);
+                requireShot(context, stage, "after " + reading * READING_TICKS + " ticks", shot);
             }
             float[] end = healths(server, shown);
             for (int index = 0; index < count; index++) {
@@ -1193,6 +1277,95 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     finished.forEach(target -> parkTarget(current, target));
                 });
         assertEffectsAccelerated(scene, change);
+    }
+
+    /// Where the server holds each of a scene's targets, and the way it turns them.
+    private static List<ShotTarget> shotTargets(
+            TestDedicatedServerContext server, List<Integer> targets) {
+        return server.computeOnServer(
+                current -> {
+                    List<ShotTarget> shot = new ArrayList<>();
+                    for (int id : targets) {
+                        Entity entity = entity(current, id);
+                        shot.add(
+                                new ShotTarget(
+                                        id,
+                                        entity.getName().getString(),
+                                        entity.position(),
+                                        entity.getYRot(),
+                                        entity instanceof ServerPlayer));
+                    }
+                    return shot;
+                });
+    }
+
+    private static void waitForShot(
+            ClientGameTestContext context, String stage, List<ShotTarget> shot) {
+        try {
+            context.waitFor(client -> shotViolation(client, shot) == null, 200);
+        } catch (AssertionError timeout) {
+            throw new AssertionError(
+                    stage
+                            + ": the client never showed the scene in place: "
+                            + context.computeOnClient(client -> shotViolation(client, shot)),
+                    timeout);
+        }
+    }
+
+    /// Fails unless the client shows every target of the scene where the server holds it, with
+    /// every player-shaped target facing the camera.
+    private static void requireShot(
+            ClientGameTestContext context, String stage, String when, List<ShotTarget> shot) {
+        String violation = context.computeOnClient(client -> shotViolation(client, shot));
+        if (violation != null) {
+            throw new AssertionError(stage + " " + when + ": " + violation);
+        }
+    }
+
+    private static String shotViolation(Minecraft client, List<ShotTarget> shot) {
+        Vec3 camera = client.player.getEyePosition();
+        for (ShotTarget target : shot) {
+            Entity entity = client.level.getEntity(target.id());
+            if (entity == null) {
+                return target.label() + " is not in the client's world";
+            }
+            double dx = entity.getX() - target.position().x;
+            double dz = entity.getZ() - target.position().z;
+            // A fish on land flops about its cell; a pinned target and the cloud stay put.
+            double reach = entity instanceof Mob ? 2.0 : 0.1;
+            if (dx * dx + dz * dz > reach * reach) {
+                return target.label() + " is not at its place";
+            }
+            if (!target.faces() || !(entity instanceof LivingEntity living)) {
+                continue;
+            }
+            float body = Mth.wrapDegrees(living.yBodyRot - target.yaw());
+            float head = Mth.wrapDegrees(living.getYHeadRot() - target.yaw());
+            if (Math.abs(body) > YAW_TOLERANCE_DEGREES || Math.abs(head) > YAW_TOLERANCE_DEGREES) {
+                return String.format(
+                        Locale.ROOT,
+                        "%s is turned %.0f degrees (body) and %.0f degrees (head) from its yaw %.0f"
+                                + " (client yaw %.0f, %d ticks on the client)",
+                        target.label(),
+                        body,
+                        head,
+                        target.yaw(),
+                        living.getYRot(),
+                        living.tickCount);
+            }
+            // Yaw 0 faces +Z, so a yaw points along (-sin, cos).
+            Vec3 toCamera = camera.subtract(entity.position());
+            float towardCamera = (float) Math.toDegrees(Math.atan2(-toCamera.x, toCamera.z));
+            float offCamera = Mth.wrapDegrees(towardCamera - target.yaw());
+            if (Math.abs(offCamera) > CAMERA_TOLERANCE_DEGREES) {
+                return String.format(
+                        Locale.ROOT,
+                        "%s faces %.0f degrees away from the camera",
+                        target.label(),
+                        offCamera);
+            }
+        }
+        return null;
     }
 
     private static void assertEffectsAccelerated(EffectScene scene, float[][] change) {
@@ -1370,13 +1543,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Connects a player-shaped, survival target the way a vanilla GameTest does, so the vanilla
     /// client renders it as a player the mod's damage applies to. Its food level sits below the
     /// regeneration threshold and above starvation, so its health only changes when something hits
-    /// it. Creates a dummy once, parked high above the arena, and remembers its id.
+    /// it. Creates a dummy once, parked far from the arena, and remembers its id.
+    ///
+    /// A dummy entering the client's view is spawned with the last rotation its ServerEntity sent
+    /// (ClientboundAddEntityPacket.java:45-49, ServerEntity.java:93 and 201-205 in the 26.3
+    /// sources), and the client builds its body from that, so the dummy holds its shown yaw from
+    /// before it joins.
     private static void createDummy(MinecraftServer server, String name) {
         ServerLevel level = server.overworld();
         CommonListenerCookie cookie =
                 CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), name), false);
         ServerPlayer target =
                 new ServerPlayer(server, level, cookie.gameProfile(), cookie.clientInformation());
+        float yaw = DUMMY_YAWS.get(name);
+        target.setYRot(yaw);
+        target.setYHeadRot(yaw);
         Connection connection = new Connection(PacketFlow.SERVERBOUND);
         new EmbeddedChannel(connection);
         server.getPlayerList().placeNewPlayer(connection, target, cookie);
@@ -1385,7 +1566,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // the fake client is already loaded.
         target.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
         target.setGameMode(GameType.SURVIVAL);
-        target.teleportTo(level, PARKING.x, PARKING.y, PARKING.z, Set.of(), 180.0F, 0.0F, false);
+        target.teleportTo(level, PARKING.x, PARKING.y, PARKING.z, Set.of(), yaw, 0.0F, false);
         target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(EFFECT_TARGET_HEALTH);
         target.setHealth(EFFECT_TARGET_HEALTH);
         target.getFoodData().setFoodLevel(17);
@@ -1398,13 +1579,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// An effect target: pinned in its cell with full effect-target health, facing the camera.
     private static int placeTarget(MinecraftServer server, String name, Vec3 position) {
-        return placeTarget(server, name, position, EFFECT_TARGET_HEALTH, 0.0F);
+        return placeTarget(server, name, position, EFFECT_TARGET_HEALTH);
     }
 
-    /// Moves a pre-created dummy to its scenario position with a fresh health pool, facing the
-    /// given way, and pins it there so knockback cannot move it out of the shot.
+    /// Moves a pre-created dummy to its scenario position with a fresh health pool, facing its yaw,
+    /// and pins it there so knockback cannot move it out of the shot.
     private static int placeTarget(
-            MinecraftServer server, String name, Vec3 position, float health, float yaw) {
+            MinecraftServer server, String name, Vec3 position, float health) {
         Integer id = DUMMIES.get(name);
         if (id == null) {
             throw new AssertionError("Expected the dummy " + name + " to exist");
@@ -1412,7 +1593,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         resetTarget(server, id, health);
         ServerPlayer target = player(server, id);
         target.teleportTo(
-                server.overworld(), position.x, position.y, position.z, Set.of(), yaw, 0.0F, false);
+                server.overworld(),
+                position.x,
+                position.y,
+                position.z,
+                Set.of(),
+                DUMMY_YAWS.get(name),
+                0.0F,
+                false);
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, position));
         return id;
     }
@@ -1437,13 +1625,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Entity target = server.overworld().getEntity(entityId);
         if (target instanceof ServerPlayer player) {
             String name =
-                    DUMMY_NAMES.stream()
-                            .filter(
-                                    candidate ->
-                                            DUMMIES.get(candidate) != null
-                                                    && DUMMIES.get(candidate) == entityId)
+                    DUMMIES.entrySet().stream()
+                            .filter(entry -> entry.getValue() == entityId)
+                            .map(Map.Entry::getKey)
                             .findFirst()
-                            .orElse("");
+                            .orElseThrow();
             player.removeAllEffects();
             player.setRemainingFireTicks(0);
             player.setHealth(player.getMaxHealth());
@@ -1453,7 +1639,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     PARKING.y,
                     PARKING.z,
                     Set.of(),
-                    180.0F,
+                    DUMMY_YAWS.get(name),
                     0.0F,
                     false);
             TRACKED.put(player.getUUID(), new TrackedTarget(player.getUUID(), name, PARKING));
