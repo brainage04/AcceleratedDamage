@@ -110,10 +110,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
     private static final int INPUT_CADENCE_TICKS = 2;
 
-    /// A bow or trident is drawn on one tick and released on the next. The server's synced
-    /// "using an item" flag for that draw reaches the client a tick after the release and starts
-    /// the use again on the client (LocalPlayer.java:596-606 in the 26.3 sources), which swallows
-    /// a use press in that tick. The next draw therefore starts a tick later, three ticks apart.
+    /// A bow or trident is drawn on one tick and released on the next. The server's synced "using
+    /// an item" flag for that draw reaches the client a tick after the release and starts the use
+    /// again on the client (LocalPlayer.java:596-606 in the 26.3 sources), which swallows a use
+    /// press in that tick. The next draw therefore starts a tick later, three ticks apart.
     private static final int DRAW_CADENCE_TICKS = 3;
 
     private static final int MAX_INPUT_GAP_TICKS = 5;
@@ -785,8 +785,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Waits until the client's own hotbar holds every weapon: the client sends no use packet for
-    /// a slot it still sees empty, so a press before the inventory update arrives would be lost.
+    /// Waits until the client's own hotbar holds every weapon: the client sends no use packet for a
+    /// slot it still sees empty, so a press before the inventory update arrives would be lost.
     private static void waitForClientHotbar(
             ClientGameTestContext context, IntFunction<ItemStack> weapon) {
         context.waitFor(
@@ -863,7 +863,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             return closing;
                         });
         System.out.println(log.describe());
-        closeStage(context, stage, Math.max(6, HALF_TICKS - (log.closeTick - log.openTick)));
+        // The cut keeps a stage up to its end marker, so the half holds its last picture before
+        // the marker until it has run about two seconds.
+        context.waitTicks(Math.max(0, HALF_TICKS - (log.closeTick - log.openTick)));
+        closeStage(context, stage, 4);
         assertCadence(log, expectedInputs);
         if (rulesOn) {
             assertEveryHitLands(log);
