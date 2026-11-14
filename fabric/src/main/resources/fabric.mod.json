@@ -5,7 +5,7 @@
   "name": "${mod_name}",
   "description": "Server-side gamerules for accelerated combat and environmental damage.",
   "authors": ["brainage04"],
-  "contact": {"homepage": "https://github.com/brainage04/AcceleratedDamage", "sources": "https://github.com/brainage04/AcceleratedDamage"},
+  "contact": {"homepage": "https://github.com/brainage04/AcceleratedDamage", "sources": "https://github.com/brainage04/AcceleratedDamage", "issues": "https://github.com/brainage04/AcceleratedDamage/issues"},
   "license": "MIT",
   "icon": "assets/accelerateddamage/icon.png",
   "environment": "*",
