@@ -16,6 +16,30 @@ public final class EffectTickCadence {
         return ascending ? currentTick + offset : currentTick - offset;
     }
 
+    /** Whether an effect applies on a tick, as {@code MobEffect.shouldApplyEffectTickThisTick} decides it. */
+    @FunctionalInterface
+    public interface TickRule<E> {
+        boolean applies(E effect, int tick, int amplifier);
+    }
+
+    /** The offsets (bit {@code offset} set) of the virtual ticks in a server tick on which the effect applies. */
+    public static <E> int scheduledOffsets(
+            E effect,
+            int amplifier,
+            int currentTick,
+            int ticksAdvanced,
+            boolean ascending,
+            TickRule<E> rule
+    ) {
+        int offsets = 0;
+        for (int offset = 0; offset < ticksAdvanced; offset++) {
+            if (rule.applies(effect, scheduledTick(currentTick, offset, ascending), amplifier)) {
+                offsets |= 1 << offset;
+            }
+        }
+        return offsets;
+    }
+
     public static int countScheduledTicks(
             int currentTick,
             int interval,

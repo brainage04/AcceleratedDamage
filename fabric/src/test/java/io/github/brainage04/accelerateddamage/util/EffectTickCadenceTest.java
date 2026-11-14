@@ -59,27 +59,32 @@ class EffectTickCadenceTest {
         return Arbitraries.of(25, 40, 50);
     }
 
+    private static final EffectTickCadence.TickRule<Integer> VANILLA_RULE =
+            (base, tick, amplifier) -> vanillaApplies(base, amplifier, tick);
+
     /**
      * A finite effect: vanilla applies it on its remaining duration and then counts down by one while the duration is
-     * above 0 (MobEffectInstance.java:223-238,255-261). The compressed timeline covers the ten durations from the
-     * current one down in one server tick, then counts down with {@link CompressedTicks#countDown}.
+     * above 0 (MobEffectInstance.java:223-238,255-261). In each server tick MobEffectInstanceMixin asks for the offsets
+     * of the {@code min(10, duration)} durations from the current one down, then counts down with
+     * {@link CompressedTicks#countDown}. Offset {@code o} of server tick {@code s} is vanilla tick {@code 10s + o}.
      */
     @Property
-    void finiteEffectAppliesInTheServerTickOfEveryVanillaApplication(
+    void finiteEffectAppliesOnTheVirtualTickOfEveryVanillaApplication(
             @ForAll("bases") int base,
             @ForAll @IntRange(max = 8) int amplifier,
             @ForAll @IntRange(min = 1, max = 20_000) int duration) {
         int serverTick = 0;
         for (int remaining = duration; remaining > 0; remaining = CompressedTicks.countDown(remaining)) {
-            int ticksAdvanced = Math.min(ACCELERATION, remaining);
             int vanilla = 0;
-            for (int virtual = serverTick * ACCELERATION; virtual < (serverTick + 1) * ACCELERATION; virtual++) {
-                int vanillaRemaining = duration - virtual;
+            for (int offset = 0; offset < ACCELERATION; offset++) {
+                int vanillaRemaining = duration - (serverTick * ACCELERATION + offset);
                 if (vanillaRemaining > 0 && vanillaApplies(base, amplifier, vanillaRemaining)) {
-                    vanilla++;
+                    vanilla |= 1 << offset;
                 }
             }
-            assertEquals(vanilla, EffectTickCadence.countScheduledTicks(remaining, base >> amplifier, ticksAdvanced, false),
+            int ticksAdvanced = Math.min(ACCELERATION, remaining);
+            assertEquals(vanilla,
+                    EffectTickCadence.scheduledOffsets(base, amplifier, remaining, ticksAdvanced, false, VANILLA_RULE),
                     "server tick " + serverTick);
             serverTick++;
         }
@@ -88,23 +93,24 @@ class EffectTickCadenceTest {
 
     /**
      * An infinite effect: vanilla applies it on the entity's tick count, one per tick (MobEffectInstance.java:228).
-     * The compressed timeline covers the next ten tick counts in each server tick.
+     * MobEffectInstanceMixin asks for the offsets of the next ten tick counts in each server tick.
      */
     @Property
-    void infiniteEffectAppliesInTheServerTickOfEveryVanillaApplication(
+    void infiniteEffectAppliesOnTheVirtualTickOfEveryVanillaApplication(
             @ForAll("bases") int base,
             @ForAll @IntRange(max = 8) int amplifier,
             @ForAll @IntRange(max = 1_000_000) int firstTickCount,
             @ForAll @IntRange(min = 1, max = 200) int serverTicks) {
         for (int serverTick = 0; serverTick < serverTicks; serverTick++) {
+            int firstOfServerTick = firstTickCount + serverTick * ACCELERATION;
             int vanilla = 0;
             for (int offset = 0; offset < ACCELERATION; offset++) {
-                if (vanillaApplies(base, amplifier, firstTickCount + serverTick * ACCELERATION + offset)) {
-                    vanilla++;
+                if (vanillaApplies(base, amplifier, firstOfServerTick + offset)) {
+                    vanilla |= 1 << offset;
                 }
             }
-            assertEquals(vanilla, EffectTickCadence.countScheduledTicks(
-                    firstTickCount + serverTick * ACCELERATION, base >> amplifier, ACCELERATION, true));
+            assertEquals(vanilla, EffectTickCadence.scheduledOffsets(
+                    base, amplifier, firstOfServerTick, ACCELERATION, true, VANILLA_RULE));
         }
     }
 

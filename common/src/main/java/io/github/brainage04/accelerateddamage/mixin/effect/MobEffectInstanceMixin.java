@@ -62,12 +62,8 @@ public abstract class MobEffectInstanceMixin {
             acceleratedDamage$wasAcceleratingInfinite = false;
         }
 
-        for (int offset = 0; offset < ticksAdvanced; offset++) {
-            int scheduledTick = EffectTickCadence.scheduledTick(currentTick, offset, ascending);
-            if (effect.shouldApplyEffectTickThisTick(scheduledTick, amplifier)) {
-                acceleratedDamage$pendingOffsets |= 1 << offset;
-            }
-        }
+        acceleratedDamage$pendingOffsets = EffectTickCadence.scheduledOffsets(
+                effect, amplifier, currentTick, ticksAdvanced, ascending, MobEffect::shouldApplyEffectTickThisTick);
         return acceleratedDamage$pendingOffsets != 0;
     }
 
