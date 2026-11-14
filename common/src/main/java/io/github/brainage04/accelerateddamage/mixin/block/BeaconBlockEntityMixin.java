@@ -1,5 +1,6 @@
 package io.github.brainage04.accelerateddamage.mixin.block;
 
+import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundEvent;
@@ -12,7 +13,6 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.ModifyConstant;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(BeaconBlockEntity.class)
 public abstract class BeaconBlockEntityMixin {
@@ -37,17 +37,14 @@ public abstract class BeaconBlockEntityMixin {
     }
 
     /** The ambient hum shares the pulse block but is not a timer, so it keeps the vanilla period. */
-    @Redirect(
+    @WrapWithCondition(
             method = "tick",
             at = @At(
                     value = "INVOKE",
                     target = "Lnet/minecraft/world/level/block/entity/BeaconBlockEntity;playSound(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/sounds/SoundEvent;)V"
             )
     )
-    private static void acceleratedDamage$humOnVanillaPulse(Level level, BlockPos pos, SoundEvent event) {
-        if (event == SoundEvents.BEACON_AMBIENT && level.getGameTime() % ACCELERATED_DAMAGE$VANILLA_PULSE != 0L) {
-            return;
-        }
-        BeaconBlockEntity.playSound(level, pos, event);
+    private static boolean acceleratedDamage$humOnVanillaPulse(Level level, BlockPos pos, SoundEvent event) {
+        return event != SoundEvents.BEACON_AMBIENT || level.getGameTime() % ACCELERATED_DAMAGE$VANILLA_PULSE == 0L;
     }
 }
