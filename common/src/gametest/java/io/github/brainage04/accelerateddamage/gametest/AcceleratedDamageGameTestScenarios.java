@@ -1,6 +1,8 @@
 package io.github.brainage04.accelerateddamage.gametest;
 
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -28,7 +30,10 @@ import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.TridentItem;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -454,6 +459,7 @@ public final class AcceleratedDamageGameTestScenarios {
             directProjectilesAt(level, player, target[0], "trident");
         });
         sequence.thenWaitUntil(() -> assertDamaged(target[0], "trident"));
+        sequence.thenExecute(() -> assertRiptideKeepsVanillaChargeTime(context, player));
         sequence.thenExecute(() -> {
             target[0].discard();
             discardProjectiles(level, player.getBoundingBox().inflate(20.0));
@@ -480,6 +486,33 @@ public final class AcceleratedDamageGameTestScenarios {
             removePlayer(server, player);
         });
         sequence.thenSucceed();
+    }
+
+    private static void assertRiptideKeepsVanillaChargeTime(GameTestHelper context, ServerPlayer player) {
+        ServerLevel level = context.getLevel();
+        BlockPos feet = player.blockPosition();
+        BlockState feetBlock = level.getBlockState(feet);
+        BlockState headBlock = level.getBlockState(feet.above());
+        try {
+            setRules(level.getGameRules(), level.getServer(), false, false, false, true);
+            level.setBlockAndUpdate(feet, Blocks.WATER.defaultBlockState());
+            level.setBlockAndUpdate(feet.above(), Blocks.WATER.defaultBlockState());
+            player.baseTick();
+            assertTrue(player.isInWaterOrRain(), "Expected the riptide fixture to put the player in water");
+            ItemStack trident = new ItemStack(Items.TRIDENT);
+            trident.enchant(level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.RIPTIDE), 3);
+            player.setItemInHand(InteractionHand.MAIN_HAND, trident);
+            TridentItem item = (TridentItem) Items.TRIDENT;
+            assertFalse(item.releaseUsing(trident, level, player, trident.getUseDuration(player) - 1),
+                    "Expected a one-tick riptide release to keep vanilla's charge time");
+            assertFalse(player.isAutoSpinAttack(),
+                    "Expected a one-tick riptide release not to start a spin the client never launches");
+            assertTrue(item.releaseUsing(trident, level, player, trident.getUseDuration(player) - 10),
+                    "Expected a riptide release after vanilla's charge time to launch");
+        } finally {
+            level.setBlockAndUpdate(feet, feetBlock);
+            level.setBlockAndUpdate(feet.above(), headBlock);
+        }
     }
 
     private static int serverTicksUntilFangsBite(GameTestHelper context) {
