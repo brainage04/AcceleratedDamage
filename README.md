@@ -22,6 +22,8 @@ The damage invincibility window gets the same 10× compression and lasts one ser
 
 Makes server-authoritative attacks fully charged immediately, independently of server tick rate.
 
+Only the server changes, so the client, including the client side of a singleplayer world, still works on vanilla's cooldown. It still fills the attack indicator after each attack, and it still holds back a spear stab until the spear is fully charged.
+
 ### Instant shooting
 
 Fully charges bows and crossbows immediately and removes the trident's minimum throw time. Riptide keeps its vanilla charge time, because only the player's client can launch the player.
@@ -48,7 +50,7 @@ Use vanilla's gamerule command to query or update a rule:
 | --- | --- |
 | `accelerateddamage:disable_i_frames` | Disables damage invincibility. |
 | `accelerateddamage:faster_effect_ticking` | Runs damage, healing and mob attack timers ten times faster. |
-| `accelerateddamage:disable_attack_cooldown` | Makes attacks fully charged immediately. |
+| `accelerateddamage:disable_attack_cooldown` | Makes attacks fully charged immediately on the server. |
 | `accelerateddamage:instant_shoot` | Removes bow, crossbow and trident charge time. |
 
 ## Compatibility
