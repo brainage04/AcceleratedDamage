@@ -12,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
@@ -211,6 +212,37 @@ public final class AcceleratedDamageGameTestScenarios {
         }
 
         context.succeed();
+    }
+
+    public static void freezeFixtureIgnoresDaylight(GameTestHelper context) {
+        ServerLevel level = context.getLevel();
+        MinecraftServer server = level.getServer();
+        GameRules rules = level.getGameRules();
+        context.startSequence()
+                .thenWaitUntil(() -> assertTrue(level.getSkyDarken() == 0,
+                        "Waiting for the daylight environment to brighten the sky"))
+                .thenExecute(() -> {
+                    try {
+                        for (boolean faster : new boolean[]{false, true}) {
+                            setRules(rules, server, true, faster, false, false);
+                            float expected = faster ? 10.0F : 19.0F;
+                            for (int trial = 0; trial < 50; trial++) {
+                                Zombie zombie = createZombie(level);
+                                assertTrue(level.environmentAttributes()
+                                                .getValue(EnvironmentAttributes.MONSTERS_BURN, zombie.position()),
+                                        "Expected daylight to burn undead where the freeze fixture runs");
+                                zombie.setHealth(20.0F);
+                                zombie.setTicksFrozen(zombie.getTicksRequiredToFreeze() + 200);
+                                tickFreeze(zombie, 10);
+                                assertEquals(expected, zombie.getHealth(),
+                                        "Expected the freeze fixture to take only freeze damage in daylight");
+                            }
+                        }
+                    } finally {
+                        setRules(rules, server, false, false, false, false);
+                    }
+                })
+                .thenSucceed();
     }
 
     public static void effectCadenceDurationAndTransitions(GameTestHelper context) {
@@ -557,6 +589,10 @@ public final class AcceleratedDamageGameTestScenarios {
     }
 
     private static void tickFreeze(Zombie zombie, int applications) {
+        // aiStep also runs the zombie's randomized sunlight ignition (Mob.java:485-514, 26.2), whose fire
+        // damage would add to the freeze damage. A helmet blocks the ignition, and freeze damage bypasses
+        // armor (DamageTypeTagsProvider BYPASSES_ARMOR), so the expected counts are unchanged.
+        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
         for (int application = 1; application <= applications; application++) {
             zombie.setTicksFrozen(zombie.getTicksRequiredToFreeze() + 20);
             zombie.tickCount = application * 4;
