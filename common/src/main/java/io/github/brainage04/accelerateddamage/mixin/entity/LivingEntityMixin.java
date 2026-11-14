@@ -1,6 +1,7 @@
 package io.github.brainage04.accelerateddamage.mixin.entity;
 
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
@@ -44,7 +45,7 @@ public abstract class LivingEntityMixin {
             return self.invulnerableTime;
         }
         return VirtualTime.isEnabled(self.level())
-                ? self.invulnerableTime + VirtualTime.remainingInTick()
+                ? CompressedTicks.cooldownSeenAt(self.invulnerableTime, VirtualTime.remainingInTick())
                 : self.invulnerableTime;
     }
 
@@ -58,7 +59,7 @@ public abstract class LivingEntityMixin {
     )
     private void acceleratedDamage$writeInvulnerability(LivingEntity self, int value) {
         self.invulnerableTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, value - VirtualTime.remainingInTick())
+                ? CompressedTicks.cooldownStoredAfterHit(value, VirtualTime.remainingInTick())
                 : value;
     }
 
@@ -72,7 +73,7 @@ public abstract class LivingEntityMixin {
     )
     private void acceleratedDamage$decayInvulnerabilityFaster(LivingEntity self, int vanillaValue) {
         self.invulnerableTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                ? CompressedTicks.remainingAfterServerTick(vanillaValue)
                 : vanillaValue;
     }
 

@@ -1,9 +1,9 @@
 package io.github.brainage04.accelerateddamage.mixin.entity.attack.brain;
 
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.world.entity.monster.breeze.Shoot;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
@@ -22,7 +22,7 @@ public abstract class BreezeShootMixin {
             index = 2
     )
     private long acceleratedDamage$shortenShootCharging(long vanillaTicks) {
-        return VirtualTime.isEnabled() ? Math.max(0L, (vanillaTicks + 1) / VirtualTime.ACCELERATION - 1) : vanillaTicks;
+        return VirtualTime.isEnabled() ? CompressedTicks.brainTimerNoLater(vanillaTicks) : vanillaTicks;
     }
 
     /** {@code BREEZE_SHOOT_RECOVERING} after a shot and {@code BREEZE_SHOOT_COOLDOWN} after the attack ends. */
@@ -38,15 +38,6 @@ public abstract class BreezeShootMixin {
             index = 2
     )
     private long acceleratedDamage$shortenShootRecovery(long vanillaTicks) {
-        return VirtualTime.isEnabled() ? acceleratedDamage$scaleTimer(vanillaTicks) : vanillaTicks;
-    }
-
-    /**
-     * Scales a vanilla brain timer whose event fires {@code vanillaTicks + 1} ticks after it is set (memory
-     * expiry and {@code Behavior} timeouts both behave this way) to the server tick nearest a tenth of that.
-     */
-    @Unique
-    private static long acceleratedDamage$scaleTimer(long vanillaTicks) {
-        return Math.max(0L, (vanillaTicks + 1 + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION - 1);
+        return VirtualTime.isEnabled() ? CompressedTicks.brainTimer(vanillaTicks) : vanillaTicks;
     }
 }

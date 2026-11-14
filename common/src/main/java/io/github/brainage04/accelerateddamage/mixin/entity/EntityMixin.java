@@ -1,6 +1,6 @@
 package io.github.brainage04.accelerateddamage.mixin.entity;
 
-import io.github.brainage04.accelerateddamage.util.EffectTickCadence;
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.world.entity.Entity;
 import org.objectweb.asm.Opcodes;
@@ -27,9 +27,8 @@ public abstract class EntityMixin {
             )
     )
     private int acceleratedDamage$includeCrossedFireDamageTick(Entity entity) {
-        if (VirtualTime.isEnabled(entity.level())
-                && EffectTickCadence.crossesScheduledTick(remainingFireTicks, 20, VirtualTime.ACCELERATION)) {
-            return remainingFireTicks - Math.floorMod(remainingFireTicks, 20);
+        if (VirtualTime.isEnabled(entity.level())) {
+            return CompressedTicks.fireTicksForDamageCheck(remainingFireTicks);
         }
         return remainingFireTicks;
     }
@@ -43,7 +42,7 @@ public abstract class EntityMixin {
     )
     private void acceleratedDamage$decrementFireFaster(Entity entity, int vanillaValue) {
         if (VirtualTime.isEnabled(entity.level())) {
-            setRemainingFireTicks(Math.max(0, remainingFireTicks - VirtualTime.ACCELERATION));
+            setRemainingFireTicks(CompressedTicks.countDown(remainingFireTicks));
             return;
         }
         setRemainingFireTicks(vanillaValue);

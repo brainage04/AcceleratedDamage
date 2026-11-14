@@ -1,5 +1,6 @@
 package io.github.brainage04.accelerateddamage.mixin.entity;
 
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.food.FoodData;
@@ -22,7 +23,7 @@ public abstract class ServerPlayerMixin {
     )
     private void acceleratedDamage$decayInvulnerabilityFaster(ServerPlayer self, int vanillaValue) {
         self.invulnerableTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                ? CompressedTicks.remainingAfterServerTick(vanillaValue)
                 : vanillaValue;
     }
 

@@ -1,5 +1,6 @@
 package io.github.brainage04.accelerateddamage.mixin.effect;
 
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.EffectTickCadence;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import it.unimi.dsi.fastutil.ints.Int2IntFunction;
@@ -115,7 +116,7 @@ public abstract class MobEffectInstanceMixin {
             Int2IntFunction vanillaMapper
     ) {
         if (VirtualTime.isEnabled()) {
-            return instance.mapDuration(duration -> Math.max(0, duration - VirtualTime.ACCELERATION));
+            return instance.mapDuration(CompressedTicks::countDown);
         }
         return instance.mapDuration(vanillaMapper);
     }

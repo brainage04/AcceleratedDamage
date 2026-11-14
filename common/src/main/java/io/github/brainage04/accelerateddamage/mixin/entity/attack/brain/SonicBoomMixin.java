@@ -1,9 +1,9 @@
 package io.github.brainage04.accelerateddamage.mixin.entity.attack.brain;
 
+import io.github.brainage04.accelerateddamage.util.CompressedTicks;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.world.entity.ai.behavior.warden.SonicBoom;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
@@ -25,7 +25,7 @@ public abstract class SonicBoomMixin {
             index = 2
     )
     private long acceleratedDamage$shortenSonicBoomTimer(long vanillaTicks) {
-        return VirtualTime.isEnabled() ? acceleratedDamage$scaleTimer(vanillaTicks) : vanillaTicks;
+        return VirtualTime.isEnabled() ? CompressedTicks.brainTimer(vanillaTicks) : vanillaTicks;
     }
 
     /**
@@ -41,15 +41,6 @@ public abstract class SonicBoomMixin {
             index = 2
     )
     private static long acceleratedDamage$shortenSonicBoomCooldown(long vanillaTicks) {
-        return VirtualTime.isEnabled() ? acceleratedDamage$scaleTimer(vanillaTicks) : vanillaTicks;
-    }
-
-    /**
-     * Scales a vanilla brain timer whose event fires {@code vanillaTicks + 1} ticks after it is set (memory
-     * expiry and {@code Behavior} timeouts both behave this way) to the server tick nearest a tenth of that.
-     */
-    @Unique
-    private static long acceleratedDamage$scaleTimer(long vanillaTicks) {
-        return Math.max(0L, (vanillaTicks + 1 + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION - 1);
+        return VirtualTime.isEnabled() ? CompressedTicks.brainTimer(vanillaTicks) : vanillaTicks;
     }
 }
