@@ -17,7 +17,9 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.InsideBlockEffectType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.golem.IronGolem;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -433,6 +435,7 @@ public final class AcceleratedDamageGameTestScenarios {
         setRules(rules, server, false, false, false, true);
         assertEquals(1.0F, BowItem.getPowerForTime(1),
                 "Expected one tick to fully charge a bow when instant shooting is enabled");
+        assertMobCrossbowsKeepVanillaChargeTime(level, server, rules);
         Vec3 playerPosition = context.absoluteVec(new Vec3(2.5, 2.0, 2.5));
         player.snapTo(playerPosition.x, playerPosition.y, playerPosition.z);
         player.forceSetRotation(0.0F, false, 0.0F, false);
@@ -530,6 +533,21 @@ public final class AcceleratedDamageGameTestScenarios {
             removePlayer(server, player);
         });
         sequence.thenSucceed();
+    }
+
+    private static void assertMobCrossbowsKeepVanillaChargeTime(ServerLevel level, MinecraftServer server, GameRules rules) {
+        ItemStack crossbow = new ItemStack(Items.CROSSBOW);
+        for (EntityType<? extends LivingEntity> type : List.<EntityType<? extends LivingEntity>>of(
+                EntityTypes.PILLAGER, EntityTypes.PIGLIN)) {
+            LivingEntity mob = type.create(level, EntitySpawnReason.COMMAND);
+            assertTrue(mob != null, "Expected to create a " + type);
+            setRules(rules, server, false, false, false, false);
+            int vanilla = CrossbowItem.getChargeDuration(crossbow, mob);
+            assertTrue(vanilla > 0, "Expected a vanilla " + type + " crossbow charge to take time");
+            setRules(rules, server, false, false, false, true);
+            assertEquals(vanilla, CrossbowItem.getChargeDuration(crossbow, mob),
+                    "Expected instant shooting to leave a " + type + "'s crossbow charge at vanilla's");
+        }
     }
 
     private static void assertRiptideKeepsVanillaChargeTime(GameTestHelper context, ServerPlayer player) {
