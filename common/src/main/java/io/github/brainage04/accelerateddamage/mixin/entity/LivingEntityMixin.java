@@ -39,8 +39,6 @@ public abstract class LivingEntityMixin {
     private int acceleratedDamage$readInvulnerability(LivingEntity self) {
         if (self.level() instanceof ServerLevel level && level.getGameRules().get(ModGameRules.DISABLE_IFRAMES)) {
             self.invulnerableTime = Math.min(self.invulnerableTime, 10);
-            self.hurtDuration = 0;
-            self.hurtTime = 0;
             return self.invulnerableTime;
         }
         return VirtualTime.isEnabled(self.level())
