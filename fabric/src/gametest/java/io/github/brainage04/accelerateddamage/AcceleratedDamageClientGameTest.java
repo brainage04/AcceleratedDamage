@@ -24,7 +24,6 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
-import java.util.function.ToDoubleFunction;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
@@ -103,18 +102,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Vec3 RANGE_STAND = new Vec3(RANGE_X, ARENA_Y, 0.5);
     private static final Vec3 RANGE_TARGET = new Vec3(RANGE_X, ARENA_Y, 4.5);
     private static final Vec3 FIREWORK_TARGET = new Vec3(RANGE_X, ARENA_Y, 8.5);
-    private static final Vec3 DROWNING_STAND = new Vec3(9.5, ARENA_Y, -6.5);
-    private static final Vec3 DROWNING_VIEW = new Vec3(9.5, ARENA_Y + 0.6, -3.2);
     private static final Vec3 EFFECTS_STAND = new Vec3(0.0, ARENA_Y, -2.5);
     private static final Vec3 HUNGER_STAND = new Vec3(0.0, ARENA_Y, -34.5);
 
-    /// A splash reaches every living entity within four blocks of where it breaks, the thrower
-    /// included (ThrownSplashPotion.java:46-55 in the 26.3 sources), and a potion thrown at 0.5
-    /// blocks a tick (ThrowablePotionItem.java:26) under a gravity of 0.05 a tick
-    /// (AbstractThrownPotion.java:45-47) breaks only about five blocks out. On the floor the
-    /// thrower would stand at the edge of its own splash, so it throws from a pillar three blocks
-    /// high, out of the splash's reach. The pillar stands east of the arena, behind or beside the
-    /// camera of every scene filmed on dry land.
+    /// A potion thrown at 0.5 blocks a tick (ThrowablePotionItem.java:26 in the 26.3 sources) under
+    /// a gravity of 0.05 a tick (AbstractThrownPotion.java:45-47) breaks only about five blocks
+    /// out, and its splash scales Harming by how close each entity's box comes to it, the thrower's
+    /// included (ThrownSplashPotion.java:45-56). From this pillar three blocks up the thrower still
+    /// sits just inside the four-block reach, but at a scale under 1/12, so the harm rounds to 0
+    /// (HealOrHarmMobEffect.java:40) and Player#hurtServer drops it without a hurt
+    /// (Player.java:701). Each splash half asserts the thrower ends it unhurt. The pillar stands
+    /// east of the arena, behind or beside the camera of every other scene.
     private static final Vec3 SPLASH_STAND = new Vec3(14.5, ARENA_Y + 3, 0.5);
 
     private static final Vec3 SPLASH_TARGET = new Vec3(9.5, ARENA_Y, 0.5);
@@ -203,6 +201,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         "Wither",
                         "Freezing",
                         "Cactus",
+                        "Drowning",
                         "Starving",
                         "Regeneration",
                         "Saturated",
@@ -237,12 +236,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private record TrackedTarget(UUID id, String name, Vec3 anchor) {}
 
     /// The server's record of one healing target in one filmed half: every tick on which the
-    /// target's own tick raised its health, and the health it gained in all.
+    /// target's own tick raised its health, the health it gained in all, and, for a healer that
+    /// heals from an effect, the effect's remaining duration when the half opened and closed.
     private static final class HealLog {
         private final int openTick;
         private final List<Integer> healTicks = new ArrayList<>();
         private float healed;
         private int closeTick;
+        private int durationOpen = -1;
+        private int durationClose = -1;
+        private int amplifier;
 
         private HealLog(int openTick) {
             this.openTick = openTick;
@@ -256,12 +259,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return healTicks.isEmpty() ? 0.0F : healed / healTicks.size();
         }
 
-        /// Heals per tick, from the ticks between the half's first and last heal.
+        /// Heals per tick, from the ticks between the half's first and last heal. Needs two heals.
         private double stepsPerTick() {
-            if (healTicks.size() < 2) {
-                throw new AssertionError(
-                        "Expected at least two heals to measure a cadence: " + this);
-            }
             return (healTicks.size() - 1) / (double) (healTicks.getLast() - healTicks.getFirst());
         }
 
@@ -269,9 +268,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         public String toString() {
             return String.format(
                     Locale.ROOT,
-                    "healed=%.1f ticks=%d healTicks=%s",
+                    "healed=%.1f ticks=%d duration=%d>%d healTicks=%s",
                     healed,
                     ticks(),
+                    durationOpen,
+                    durationClose,
                     healTicks.stream().map(tick -> tick - openTick).toList());
         }
     }
@@ -395,8 +396,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// One effect scenario: its targets' names in caption order, how many of those names the
     /// caption's first line holds in place of the subject (0 when one line holds every name), which
-    /// of them heal instead of taking damage, with each healer's vanilla heals per tick read from
-    /// its rules-off half, and which of them vanilla may hurt by at most four health in a half.
+    /// of them heal instead of taking damage (with the effect they heal from, or empty for healing
+    /// from saturation), which of them vanilla may hurt by at most four health in a half, and which
+    /// of them stand under water.
     private record EffectScene(
             String id,
             String subject,
@@ -404,8 +406,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             Vec3 view,
             List<String> names,
             int titleNames,
-            Map<String, ToDoubleFunction<HealLog>> healers,
+            Map<String, Optional<Holder<MobEffect>>> healers,
             Set<String> slowInVanilla,
+            Set<String> underWater,
             EffectSetup setup,
             EffectStart start) {}
 
@@ -449,7 +452,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         context.waitTicks(10);
 
                         recordMelee(context, server, playerId);
-                        recordDrowning(context, server, playerId);
                         recordBow(context, server, playerId);
                         recordLoadedHotbar(
                                 context,
@@ -520,8 +522,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// later costs only a few ticks.
     private static void preloadArena(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        List<Vec3> viewpoints =
-                List.of(EFFECTS_STAND, SPLASH_STAND, HUNGER_STAND, DROWNING_STAND, RANGE_STAND);
+        List<Vec3> viewpoints = List.of(EFFECTS_STAND, SPLASH_STAND, HUNGER_STAND, RANGE_STAND);
         for (Vec3 viewpoint : viewpoints) {
             server.runOnServer(
                     current ->
@@ -605,9 +606,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (tracked.anchor() != null) {
                 target.setPos(tracked.anchor().x, tracked.anchor().y, tracked.anchor().z);
             }
-            target.setCustomName(
-                    Component.literal(
-                            tracked.name() + " " + Math.round(Math.max(0.0F, target.getHealth()))));
+            String tag = tracked.name() + " " + Math.round(Math.max(0.0F, target.getHealth()));
+            if (target.getAirSupply() < target.getMaxAirSupply()) {
+                tag += " air " + Math.max(0, target.getAirSupply());
+            }
+            target.setCustomName(Component.literal(tag));
         }
     }
 
@@ -649,32 +652,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     Mth.floor(SPLASH_STAND.z),
                     Blocks.STONE_BRICKS);
         }
-        // The drowning box: a glass wall around one column of water, so the film shows the water
-        // the player is in.
-        for (int y = ARENA_Y; y <= ARENA_Y + 3; y++) {
-            for (int x = 6; x <= 12; x++) {
-                for (int z = -10; z <= -3; z++) {
-                    boolean wall = x == 6 || x == 12 || z == -10 || z == -3 || y == ARENA_Y + 3;
-                    level.setBlockAndUpdate(
-                            new BlockPos(x, y, z),
-                            wall
-                                    ? Blocks.GLASS.defaultBlockState()
-                                    : Blocks.WATER.defaultBlockState());
-                }
-            }
-        }
-
-        // The flat world has air under the arena floor, so every sand block gets stone under it:
-        // unsupported sand falls, and a cactus on falling sand breaks.
-        for (int x = 7; x <= 11; x++) {
-            for (int z = -9; z <= -4; z++) {
-                setBlock(level, x, ARENA_Y - 2, z, Blocks.STONE);
-                setBlock(level, x, ARENA_Y - 1, z, Blocks.SAND);
-            }
-        }
-        for (int[] spot : new int[][] {{9, -8}, {8, -5}, {10, -4}, {7, -7}}) {
-            level.setBlockAndUpdate(
-                    new BlockPos(spot[0], ARENA_Y, spot[1]), Blocks.SEAGRASS.defaultBlockState());
+        // The drowning target's tank: two blocks of water, so its eyes are under the surface, in
+        // a glass ring that holds the water in.
+        for (int y = ARENA_Y; y <= ARENA_Y + 1; y++) {
+            setBlock(level, -2, y, -18, Blocks.WATER);
+            setBlock(level, -3, y, -18, Blocks.GLASS);
+            setBlock(level, -1, y, -18, Blocks.GLASS);
+            setBlock(level, -2, y, -17, Blocks.GLASS);
+            setBlock(level, -2, y, -19, Blocks.GLASS);
         }
 
         plainCell(level, -5, -8);
@@ -1121,82 +1106,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    private static void recordDrowning(
-            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        enterScene(context, server, playerId, DROWNING_STAND, DROWNING_VIEW);
-        String offTitle = "Under water, effect and i-frame rules off";
-        openStage(context, "showcase.drowning-off", offTitle, "air 300, health 20");
-        server.runOnServer(
-                current -> {
-                    setEffectRules(current, false);
-                    healPlayer(current, playerId);
-                });
-        int[] slow = new int[2];
-        for (int reading = 0; reading <= 3; reading++) {
-            if (reading > 0) {
-                context.waitTicks(10);
-            }
-            slow = reportAir(context, server, playerId, "showcase.drowning-off", offTitle, reading);
-        }
-        if (slow[0] < 200 || slow[1] != 20) {
-            throw new AssertionError(
-                    "Expected vanilla air to last, air was " + slow[0] + " and health " + slow[1]);
-        }
-        closeStage(context, "showcase.drowning-off", 4);
-
-        String onTitle = "Under water, effect and i-frame rules on";
-        openStage(context, "showcase.drowning-on", onTitle, "air 300, health 20");
-        server.runOnServer(
-                current -> {
-                    setEffectRules(current, true);
-                    healPlayer(current, playerId);
-                });
-        int[] drowned = new int[2];
-        for (int reading = 0; reading <= 4; reading++) {
-            if (reading > 0) {
-                context.waitTicks(10);
-            }
-            drowned =
-                    reportAir(context, server, playerId, "showcase.drowning-on", onTitle, reading);
-        }
-        if (drowned[0] > 0 || drowned[1] >= 20) {
-            throw new AssertionError(
-                    "Expected the air to run out and drowning damage to start, air was "
-                            + drowned[0]
-                            + " and health "
-                            + drowned[1]);
-        }
-        // Out of the water before the next hit would kill: a death screen would cover every later
-        // scenario.
-        server.runOnServer(
-                current -> {
-                    setEffectRules(current, false);
-                    healPlayer(current, playerId);
-                });
-        closeStage(context, "showcase.drowning-on", 4);
-    }
-
-    private static int[] reportAir(
-            ClientGameTestContext context,
-            TestDedicatedServerContext server,
-            int playerId,
-            String stepId,
-            String stepTitle,
-            int reading) {
-        int[] state =
-                server.computeOnServer(
-                        current -> {
-                            ServerPlayer player = player(current, playerId);
-                            return new int[] {
-                                player.getAirSupply(), Math.round(player.getHealth())
-                            };
-                        });
-        String line = (reading * 10) + " ticks: air " + state[0] + ", health " + state[1];
-        ClientGameTestRecorder.showStep(context, stepId, stepTitle, line);
-        System.out.println("AD_CURVE " + stepId + " " + line);
-        return state;
-    }
-
     private static void setEffectRules(MinecraftServer server, boolean on) {
         GameRules rules = server.overworld().getGameRules();
         rules.set(ModGameRules.FASTER_EFFECT_TICKING, on, server);
@@ -1206,20 +1115,30 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// Fire, lava, poison and wither in the front row; powder snow, cactus and a fish on land in
-    /// the back row, each back-row target in a gap of the front row, so the camera sees all seven.
-    /// The caption panel cuts a line at 360 GUI pixels (MinecraftModConventions 3.4.0,
-    /// ClientGameTestRecordingHud.java:24), short of seven figures and the rules, so the title
-    /// carries the first five figures and the subtitle the other two and the rules.
+    /// the back row, each back-row target in a gap of the front row; a player in a water tank
+    /// further back, in the gap left of the cactus, so the camera sees all eight. The caption panel
+    /// cuts a line at 360 GUI pixels (MinecraftModConventions 3.4.0,
+    /// ClientGameTestRecordingHud.java:24), short of eight figures and the rules, so the title
+    /// carries the first five figures and the subtitle the other three and the rules.
     private static EffectScene effectsScene() {
         return new EffectScene(
                 "effects",
                 null,
                 EFFECTS_STAND,
                 new Vec3(0.0, ARENA_Y + 0.9, -10.0),
-                List.of("Fire", "Lava", "Poison", "Wither", "Freezing", "Cactus", "Drying"),
+                List.of(
+                        "Fire",
+                        "Lava",
+                        "Poison",
+                        "Wither",
+                        "Freezing",
+                        "Cactus",
+                        "Drying",
+                        "Drowning"),
                 5,
                 Map.of(),
                 Set.of("Fire", "Poison", "Wither"),
+                Set.of("Drowning"),
                 (current, previous) -> {
                     int fire = placeTarget(current, "Fire", new Vec3(-4.5, ARENA_Y, -7.5));
                     int lava = placeTarget(current, "Lava", new Vec3(-1.5, ARENA_Y, -7.5));
@@ -1235,12 +1154,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                             "Drying",
                                             new Vec3(6.5, ARENA_Y, -12.5))
                                     : previous.get(6);
+                    int drowning = placeTarget(current, "Drowning", new Vec3(-1.5, ARENA_Y, -17.5));
                     LivingEntity fish = living(current, drying);
                     fish.getAttribute(Attributes.MAX_HEALTH).setBaseValue(EFFECT_TARGET_HEALTH);
                     fish.setHealth(EFFECT_TARGET_HEALTH);
                     fish.setAirSupply(0);
                     List<Integer> targets =
-                            List.of(fire, lava, poison, wither, freezing, cactus, drying);
+                            List.of(fire, lava, poison, wither, freezing, cactus, drying, drowning);
                     setDamageEffects(current, targets);
                     return targets;
                 },
@@ -1248,6 +1168,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     setDamageEffects(current, targets);
                     living(current, targets.get(4)).setTicksFrozen(0);
                     living(current, targets.get(6)).setAirSupply(0);
+                    // The tank drains the air from its placing on; the curve starts full at the
+                    // marker.
+                    LivingEntity drowning = living(current, targets.get(7));
+                    drowning.setAirSupply(drowning.getMaxAirSupply());
                 });
     }
 
@@ -1280,13 +1204,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 0,
                 Map.of(
                         "Regeneration",
-                        off ->
-                                applicationsPerTick(
-                                        MobEffects.REGENERATION,
-                                        REGENERATION_AMPLIFIER,
-                                        REGENERATION_TICKS),
+                        Optional.of(MobEffects.REGENERATION),
                         "Saturated",
-                        HealLog::stepsPerTick),
+                        Optional.empty()),
+                Set.of(),
                 Set.of(),
                 (current, previous) -> {
                     ServerLevel level = current.overworld();
@@ -1343,22 +1264,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
     }
 
-    /// How many times per tick vanilla applies an effect at an amplifier, asked of the effect
-    /// itself over {@code ticks} ticks of its duration.
-    private static double applicationsPerTick(Holder<MobEffect> effect, int amplifier, int ticks) {
-        int applications = 0;
-        for (int tick = 1; tick <= ticks; tick++) {
-            if (effect.value().shouldApplyEffectTickThisTick(tick, amplifier)) {
-                applications++;
-            }
-        }
-        return applications / (double) ticks;
-    }
-
     /// One effect scenario: about two seconds with faster_effect_ticking and disable_i_frames off,
     /// then the same targets with fresh health and the same effects with both rules on. Every
-    /// target loses more health (a healer gains more) with the rules on than with them off, and a
-    /// healer heals ten times as fast as vanilla with them on.
+    /// target loses more health (a healer gains more) with the rules on than with them off, a
+    /// healer heals ten times as fast with them on, and a target under water keeps its air and
+    /// health with them off and runs out of air and drowns with them on.
     ///
     /// Each half's targets, effects and cloud are in place, shown by the client and facing the
     /// camera before the half's marker. Until the marker the targets are invulnerable, so every
@@ -1372,6 +1282,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         server.runOnServer(current -> player(current, playerId).getInventory().clearContent());
         int count = scene.names().size();
         float[][] change = new float[2][count];
+        int[][] air = new int[2][count];
         List<Map<String, HealLog>> heals = new ArrayList<>();
         List<Integer> targets = List.of();
         for (int half = 0; half < 2; half++) {
@@ -1404,18 +1315,33 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                                 entity(current, id)
                                                         .setPermanentlyInvulnerable(false));
                                 scene.start().begin(current, placed);
-                                for (String healer : scene.healers().keySet()) {
-                                    HEAL_LOGS.put(
-                                            shown.get(scene.names().indexOf(healer)),
-                                            new HealLog(serverTick));
+                                for (Map.Entry<String, Optional<Holder<MobEffect>>> healer :
+                                        scene.healers().entrySet()) {
+                                    LivingEntity target =
+                                            healerOf(current, shown, scene, healer.getKey());
+                                    HealLog log = new HealLog(serverTick);
+                                    MobEffectInstance instance =
+                                            healer.getValue().map(target::getEffect).orElse(null);
+                                    if (instance != null) {
+                                        log.durationOpen = instance.getDuration();
+                                        log.amplifier = instance.getAmplifier();
+                                    }
+                                    HEAL_LOGS.put(target.getId(), log);
                                 }
                                 return healthsOf(current, shown);
                             });
-            System.out.println("AD_CURVE " + stage + " 0 ticks: " + String.join(" | ", starting));
+            String startingAir = server.computeOnServer(current -> airLine(current, shown, scene));
+            System.out.println(
+                    "AD_CURVE "
+                            + stage
+                            + " 0 ticks: "
+                            + String.join(" | ", starting)
+                            + startingAir);
             for (int reading = 1; reading <= 3; reading++) {
                 context.waitTicks(READING_TICKS);
                 String[] label =
                         server.computeOnServer(current -> caption(current, shown, scene, rulesOn));
+                String airLabel = server.computeOnServer(current -> airLine(current, shown, scene));
                 ClientGameTestRecorder.showStep(context, stage, label[0], label[1]);
                 System.out.println(
                         "AD_CURVE "
@@ -1423,19 +1349,32 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 + " "
                                 + reading * READING_TICKS
                                 + " ticks: "
-                                + String.join(" | ", label));
+                                + String.join(" | ", label)
+                                + airLabel);
                 requireShot(context, stage, "after " + reading * READING_TICKS + " ticks", shot);
             }
             Map<String, HealLog> halfHeals = new LinkedHashMap<>();
+            int[] halfAir = air[half];
             float[] end =
                     server.computeOnServer(
                             current -> {
-                                for (String healer : scene.healers().keySet()) {
-                                    HealLog log =
-                                            HEAL_LOGS.remove(
-                                                    shown.get(scene.names().indexOf(healer)));
+                                for (Map.Entry<String, Optional<Holder<MobEffect>>> healer :
+                                        scene.healers().entrySet()) {
+                                    LivingEntity target =
+                                            healerOf(current, shown, scene, healer.getKey());
+                                    HealLog log = HEAL_LOGS.remove(target.getId());
                                     log.closeTick = serverTick;
-                                    halfHeals.put(healer, log);
+                                    if (healer.getValue().isPresent()) {
+                                        MobEffectInstance instance =
+                                                target.getEffect(healer.getValue().get());
+                                        log.durationClose =
+                                                instance == null ? 0 : instance.getDuration();
+                                    }
+                                    halfHeals.put(healer.getKey(), log);
+                                }
+                                for (int index = 0; index < count; index++) {
+                                    halfAir[index] =
+                                            living(current, shown.get(index)).getAirSupply();
                                 }
                                 return healthsOf(current, shown);
                             });
@@ -1452,56 +1391,121 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     finished.forEach(target -> parkTarget(current, target));
                 });
         assertHealingAccelerated(scene, heals);
+        assertDrowning(scene, change, air);
         assertEffectsAccelerated(scene, change);
     }
 
-    /// With the rules off a healer heals at vanilla's rate, and with them on at ten times that
-    /// rate, each within one heal. Vanilla's rate is one heal of the rules-off half times the
-    /// healer's vanilla heals per tick. The take's log keeps one line per healer for the report.
+    private static LivingEntity healerOf(
+            MinecraftServer server, List<Integer> shown, EffectScene scene, String healer) {
+        return living(server, shown.get(scene.names().indexOf(healer)));
+    }
+
+    /// The air of every target under water, for the take's log; the name tags show it on screen.
+    private static String airLine(MinecraftServer server, List<Integer> shown, EffectScene scene) {
+        StringBuilder line = new StringBuilder();
+        for (String name : scene.underWater()) {
+            line.append(" | ")
+                    .append(name)
+                    .append(" air ")
+                    .append(living(server, shown.get(scene.names().indexOf(name))).getAirSupply());
+        }
+        return line.toString();
+    }
+
+    /// The checks of the drowning stage this scene took over: with the rules off a target under
+    /// water keeps at least 200 of its air and all of its health, and with them on its air runs out
+    /// and drowning damage starts.
+    private static void assertDrowning(EffectScene scene, float[][] change, int[][] air) {
+        for (String name : scene.underWater()) {
+            int index = scene.names().indexOf(name);
+            if (air[0][index] < 200 || change[0][index] != 0.0F) {
+                throw new AssertionError(
+                        "Expected vanilla air to last for "
+                                + name
+                                + ", air was "
+                                + air[0][index]
+                                + " and health changed by "
+                                + change[0][index]);
+            }
+            if (air[1][index] > 0 || change[1][index] >= 0.0F) {
+                throw new AssertionError(
+                        "Expected "
+                                + name
+                                + "'s air to run out and drowning damage to start, air was "
+                                + air[1][index]
+                                + " and health changed by "
+                                + change[1][index]);
+            }
+        }
+    }
+
+    /// The tick log of every healer and the checks that it heals ten times as fast with the rules
+    /// on. A healer that heals from an effect is checked exactly against the effect itself: each
+    /// half heals once for every remaining duration the half covered at which the effect applies
+    /// ({@code shouldApplyEffectTickThisTick}), and the half covers one duration a tick with the
+    /// rules off and ten with them on. Regeneration II applies at most once in 25 durations
+    /// (RegenerationMobEffect.java:21-24 in the 26.3 sources), so one heal tick is one application.
+    /// A healer that heals from saturation has no vanilla API for its cadence (the 10-tick timer is
+    /// FoodData.java:47), so its vanilla rate is measured from the gaps between its heals with the
+    /// rules off (so its rules-off check only catches an uneven cadence), and each half must heal
+    /// within one heal of that rate, times ten with the rules on.
     private static void assertHealingAccelerated(
             EffectScene scene, List<Map<String, HealLog>> heals) {
         List<String> failures = new ArrayList<>();
-        for (Map.Entry<String, ToDoubleFunction<HealLog>> healer : scene.healers().entrySet()) {
+        for (Map.Entry<String, Optional<Holder<MobEffect>>> healer : scene.healers().entrySet()) {
             String name = healer.getKey();
             HealLog off = heals.get(0).get(name);
             HealLog on = heals.get(1).get(name);
-            float step = off.healPerStep();
-            double vanillaPerTick = step * healer.getValue().applyAsDouble(off);
+            if (off.healTicks.size() < 2 || on.healTicks.isEmpty()) {
+                failures.add(
+                        String.format(
+                                Locale.ROOT,
+                                "Expected %s in showcase.%s to heal at least twice with the rules"
+                                        + " off and at least once with them on: off[%s] on[%s]",
+                                name,
+                                scene.id(),
+                                off,
+                                on));
+                continue;
+            }
+            double offPerTick = off.healed / (double) off.ticks();
             double onPerTick = on.healed / (double) on.ticks();
             String line =
                     String.format(
                             Locale.ROOT,
-                            "AD_TICKLOG showcase.%s heal %s off[%s] on[%s] vanillaPerTick=%.4f"
-                                    + " onPerTick=%.4f onOverVanilla=%.2f",
+                            "AD_TICKLOG showcase.%s heal %s off[%s] on[%s] offPerTick=%.4f"
+                                    + " onPerTick=%.4f onOverOff=%.2f",
                             scene.id(),
                             name,
                             off,
                             on,
-                            vanillaPerTick,
+                            offPerTick,
                             onPerTick,
-                            onPerTick / vanillaPerTick);
+                            onPerTick / offPerTick);
             System.out.println(line);
-            if (step <= 0.0F) {
-                failures.add("Expected " + name + " to heal with the rules off: " + line);
+            if (healer.getValue().isPresent()) {
+                MobEffect effect = healer.getValue().get().value();
+                checkEffectHeals(name, "off", effect, off, 1, line, failures);
+                checkEffectHeals(name, "on", effect, on, VirtualTime.ACCELERATION, line, failures);
                 continue;
             }
-            double expectedOff = vanillaPerTick * off.ticks();
+            float step = off.healPerStep();
+            double vanillaPerTick = step * off.stepsPerTick();
             double expectedOn = VirtualTime.ACCELERATION * vanillaPerTick * on.ticks();
-            if (Math.abs(off.healed - expectedOff) > step) {
+            if (Math.abs(off.healed - vanillaPerTick * off.ticks()) > step) {
                 failures.add(
                         String.format(
                                 Locale.ROOT,
-                                "Expected %s to heal %.1f at vanilla's rate with the rules off: %s",
+                                "Expected %s to heal at an even rate with the rules off: %s",
                                 name,
-                                expectedOff,
                                 line));
             }
             if (Math.abs(on.healed - expectedOn) > step) {
                 failures.add(
                         String.format(
                                 Locale.ROOT,
-                                "Expected %s to heal %.1f, %d times vanilla's rate, with the rules"
-                                        + " on: %s",
+                                "Expected %s to heal %.1f, %d times its rules-off rate, with the"
+                                        + " rules on: %s",
                                 name,
                                 expectedOn,
                                 VirtualTime.ACCELERATION,
@@ -1510,6 +1514,39 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         if (!failures.isEmpty()) {
             throw new AssertionError(String.join("\n", failures));
+        }
+    }
+
+    private static void checkEffectHeals(
+            String name,
+            String half,
+            MobEffect effect,
+            HealLog log,
+            int durationsPerTick,
+            String line,
+            List<String> failures) {
+        int covered = log.durationOpen - log.durationClose;
+        int expectedCovered = durationsPerTick * log.ticks();
+        int expectedHeals = 0;
+        for (int duration = log.durationOpen; duration > log.durationClose; duration--) {
+            if (effect.shouldApplyEffectTickThisTick(duration, log.amplifier)) {
+                expectedHeals++;
+            }
+        }
+        if (covered != expectedCovered || log.healTicks.size() != expectedHeals) {
+            failures.add(
+                    String.format(
+                            Locale.ROOT,
+                            "Expected %s with the rules %s to cover %d durations in %d ticks and"
+                                    + " heal %d times, it covered %d and healed %d times: %s",
+                            name,
+                            half,
+                            expectedCovered,
+                            log.ticks(),
+                            expectedHeals,
+                            covered,
+                            log.healTicks.size(),
+                            line));
         }
     }
 
@@ -1859,7 +1896,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// Gives a dummy a fresh health pool and clears what the last half left on it: fire, frost,
-    /// effects, stuck arrows and the feeding.
+    /// effects, stuck arrows, spent air and the feeding.
     private static void resetTarget(MinecraftServer server, int targetId, float health) {
         FED.remove(targetId);
         ServerPlayer target = player(server, targetId);
@@ -1870,6 +1907,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setRemainingFireTicks(0);
         target.setTicksFrozen(0);
         target.setArrowCount(0);
+        target.setAirSupply(target.getMaxAirSupply());
         target.removeAllEffects();
     }
 
