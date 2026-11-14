@@ -24,7 +24,7 @@ Makes server-authoritative attacks fully charged immediately, independently of s
 
 ### Instant shooting
 
-Fully charges bows and crossbows immediately and removes the trident's minimum throw time.
+Fully charges bows and crossbows immediately and removes the trident's minimum throw time. Riptide keeps its vanilla charge time, because only the player's client can launch the player.
 
 ## Getting started
 
