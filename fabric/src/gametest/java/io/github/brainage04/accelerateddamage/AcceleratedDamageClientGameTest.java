@@ -286,7 +286,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int slot,
             boolean crossbow
     ) {
-        server.runOnServer(current -> prepareShooter(current, label, slot));
+        // A one-tick bow shot is a crit and can deal 10 (AbstractArrow.java:436,454-455), a cow's whole health
+        // (AbstractCow.java:57). A killed target leaves the level after its death animation, so the check holds the
+        // entity instead of looking it up by name afterwards.
+        Cow target = server.computeOnServer(current -> prepareShooter(current, label, slot));
         context.waitTicks(10);
         context.getInput().holdKeyFor(options -> options.keyUse, 1);
         context.waitTicks(10);
@@ -294,10 +297,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             context.getInput().pressKey(options -> options.keyUse);
         }
         context.waitTicks(15);
-        server.runOnServer(current -> assertTargetDamaged(current, label));
+        server.runOnServer(current -> assertDamaged(target, label));
     }
 
-    private static ServerPlayer prepareShooter(MinecraftServer server, String targetName, int selectedSlot) {
+    private static Cow prepareShooter(MinecraftServer server, String targetName, int selectedSlot) {
         ServerLevel level = server.overworld();
         ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
         Cow target = findTarget(level, targetName);
@@ -306,7 +309,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.connection.send(new ClientboundSetHeldSlotPacket(selectedSlot));
         player.teleportTo(level, -3.0, ARENA_Y, target.getZ(), Set.of(), -90.0F, 0.0F, false);
         aimAt(player, target);
-        return player;
+        return target;
     }
 
     private static Cow createTarget(ServerLevel level, String label, double x, double y, double z) {
@@ -341,7 +344,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     private static void assertTargetDamaged(MinecraftServer server, String label) {
-        Cow target = findTarget(server.overworld(), label);
+        assertDamaged(findTarget(server.overworld(), label), label);
+    }
+
+    private static void assertDamaged(Cow target, String label) {
         if (!(target.getHealth() < target.getMaxHealth())) {
             throw new AssertionError("Expected the displayed weapon or effect to damage " + label + ".");
         }
