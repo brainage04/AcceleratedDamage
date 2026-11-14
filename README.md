@@ -51,7 +51,7 @@ Use vanilla's gamerule command to query or update a rule:
 | `accelerateddamage:disable_i_frames` | Disables damage invincibility. |
 | `accelerateddamage:faster_effect_ticking` | Runs damage, healing and mob attack timers ten times faster. |
 | `accelerateddamage:disable_attack_cooldown` | Makes attacks fully charged immediately on the server. |
-| `accelerateddamage:instant_shoot` | Removes bow, crossbow and trident charge time. |
+| `accelerateddamage:instant_shoot` | Removes the charge time of a player's bow, crossbow and trident. Mobs keep vanilla timing. |
 
 ## Compatibility
 

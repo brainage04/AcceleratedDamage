@@ -3,6 +3,7 @@ package io.github.brainage04.accelerateddamage.mixin.item;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,7 +23,8 @@ public class CrossbowItemMixin {
             LivingEntity user,
             CallbackInfoReturnable<Integer> cir
     ) {
-        if (user.level() instanceof ServerLevel level
+        if (user instanceof Player
+                && user.level() instanceof ServerLevel level
                 && level.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
             cir.setReturnValue(0);
         }
