@@ -556,6 +556,10 @@ public final class AcceleratedDamageGameTestScenarios {
     }
 
     private static void tickFreeze(Zombie zombie, int applications) {
+        // aiStep also runs the zombie's randomized sunlight ignition (Mob.java:485-514, 26.2), whose fire
+        // damage would add to the freeze damage. A helmet blocks the ignition, and freeze damage bypasses
+        // armor (DamageTypeTagsProvider BYPASSES_ARMOR), so the expected counts are unchanged.
+        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
         for (int application = 1; application <= applications; application++) {
             zombie.setTicksFrozen(zombie.getTicksRequiredToFreeze() + 20);
             zombie.tickCount = application * 4;
