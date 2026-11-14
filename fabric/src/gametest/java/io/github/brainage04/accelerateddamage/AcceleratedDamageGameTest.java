@@ -16,6 +16,11 @@ public final class AcceleratedDamageGameTest {
         AcceleratedDamageGameTestScenarios.fireAndFreezeUseSingleCompressedTimeline(context);
     }
 
+    @GameTest(environment = "accelerateddamage:daylight", maxTicks = 40)
+    public void freezeFixtureIgnoresDaylight(GameTestHelper context) {
+        AcceleratedDamageGameTestScenarios.freezeFixtureIgnoresDaylight(context);
+    }
+
     @GameTest(environment = "accelerateddamage:effect_cadence")
     public void effectCadenceDurationAndTransitions(GameTestHelper context) {
         AcceleratedDamageGameTestScenarios.effectCadenceDurationAndTransitions(context);

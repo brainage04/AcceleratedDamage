@@ -20,6 +20,8 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageGameTestScenarios::damageRulesAndSourceBoundaries);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("fire_and_freeze_use_single_compressed_timeline"),
                 () -> AcceleratedDamageGameTestScenarios::fireAndFreezeUseSingleCompressedTimeline);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("freeze_fixture_ignores_daylight"),
+                () -> AcceleratedDamageGameTestScenarios::freezeFixtureIgnoresDaylight);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("effect_cadence_duration_and_transitions"),
                 () -> AcceleratedDamageGameTestScenarios::effectCadenceDurationAndTransitions);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("mob_attacks_use_compressed_timeline"),
