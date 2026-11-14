@@ -1,10 +1,18 @@
 package io.github.brainage04.accelerateddamage.gametest;
 
+import com.mojang.authlib.GameProfile;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -33,6 +41,7 @@ import net.minecraft.world.phys.Vec3;
 import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 public final class AcceleratedDamageTimerScenarios {
     private AcceleratedDamageTimerScenarios() {
@@ -201,10 +210,89 @@ public final class AcceleratedDamageTimerScenarios {
     public static void beaconAndConduitPulses(GameTestHelper context) {
         ServerLevel level = context.getLevel();
         context.startSequence()
+                .thenWaitUntil(() -> context.assertTrue(level.getGameTime() % 80L == 0L,
+                        "Waiting for a vanilla beacon pulse boundary"))
+                .thenExecute(() -> assertBeaconAmbientOnVanillaPulse(context))
                 .thenWaitUntil(() -> context.assertTrue(level.getGameTime() % 80L == 8L,
                         "Waiting for a non-vanilla beacon and conduit pulse boundary"))
                 .thenExecute(() -> assertBlockPulses(context))
                 .thenSucceed();
+    }
+
+    private static void assertBeaconAmbientOnVanillaPulse(GameTestHelper context) {
+        ServerLevel level = context.getLevel();
+        boolean previous = level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
+        BlockPos center = context.absolutePos(new BlockPos(3, 3, 3));
+        Map<BlockPos, BlockState> originalBlocks = new LinkedHashMap<>();
+        SoundListener listener = SoundListener.join(level);
+        try {
+            for (BlockPos pos : BlockPos.betweenClosed(center.offset(-1, -1, -1), center.offset(1, 0, 1))) {
+                originalBlocks.put(pos.immutable(), level.getBlockState(pos));
+            }
+            BeaconBlockEntity beacon = placeBeacon(context, center);
+            listener.player().setPos(Vec3.atCenterOf(center.above()));
+            level.getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, true, level.getServer());
+            listener.drainSounds(SoundEvents.BEACON_AMBIENT);
+            for (int tick = 0; tick < 3; tick++) {
+                BeaconBlockEntity.tick(level, center, beacon.getBlockState(), beacon);
+            }
+            context.assertTrue(listener.drainSounds(SoundEvents.BEACON_AMBIENT) > 0,
+                    "An accelerated beacon must still hum on vanilla's 80-tick pulse");
+        } finally {
+            listener.leave(level);
+            for (Map.Entry<BlockPos, BlockState> entry : originalBlocks.entrySet()) {
+                level.setBlockAndUpdate(entry.getKey(), entry.getValue());
+            }
+            level.getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, previous, level.getServer());
+        }
+    }
+
+    private static BeaconBlockEntity placeBeacon(GameTestHelper context, BlockPos center) {
+        ServerLevel level = context.getLevel();
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                level.setBlockAndUpdate(center.offset(x, -1, z), Blocks.IRON_BLOCK.defaultBlockState());
+            }
+        }
+        level.setBlockAndUpdate(center, Blocks.BEACON.defaultBlockState());
+        BeaconBlockEntity beacon = (BeaconBlockEntity) level.getBlockEntity(center);
+        context.assertTrue(beacon != null, "The beacon fixture must create a block entity");
+        try {
+            Field primaryPower = BeaconBlockEntity.class.getDeclaredField("primaryPower");
+            primaryPower.setAccessible(true);
+            primaryPower.set(beacon, MobEffects.SPEED);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not configure the beacon's selected effect", exception);
+        }
+        return beacon;
+    }
+
+    /** A mock player whose outbound packets stay readable, so a test can see which sounds the server sent it. */
+    private record SoundListener(ServerPlayer player, EmbeddedChannel channel) {
+        static SoundListener join(ServerLevel level) {
+            CommonListenerCookie cookie = CommonListenerCookie.createInitial(
+                    new GameProfile(UUID.randomUUID(), "test-listener"), false);
+            ServerPlayer player = new ServerPlayer(level.getServer(), level, cookie.gameProfile(), cookie.clientInformation());
+            Connection connection = new Connection(PacketFlow.SERVERBOUND);
+            EmbeddedChannel channel = new EmbeddedChannel(connection);
+            level.getServer().getPlayerList().placeNewPlayer(connection, player, cookie);
+            return new SoundListener(player, channel);
+        }
+
+        int drainSounds(SoundEvent sound) {
+            int count = 0;
+            for (Object message = channel.readOutbound(); message != null; message = channel.readOutbound()) {
+                if (message instanceof ClientboundSoundPacket packet && packet.getSound().value() == sound) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        void leave(ServerLevel level) {
+            level.getServer().getPlayerList().remove(player);
+            channel.releaseOutbound();
+        }
     }
 
     private static void assertBlockPulses(GameTestHelper context) {
@@ -212,7 +300,8 @@ public final class AcceleratedDamageTimerScenarios {
         boolean previous = level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);
         BlockPos center = context.absolutePos(new BlockPos(3, 3, 3));
         Map<BlockPos, BlockState> originalBlocks = new LinkedHashMap<>();
-        ServerPlayer player = context.makeMockServerPlayerInLevel();
+        SoundListener listener = SoundListener.join(level);
+        ServerPlayer player = listener.player();
         try {
             for (BlockPos pos : BlockPos.betweenClosed(center.offset(-2, -2, -2), center.offset(2, 2, 2))) {
                 originalBlocks.put(pos.immutable(), level.getBlockState(pos));
@@ -242,17 +331,7 @@ public final class AcceleratedDamageTimerScenarios {
             for (BlockPos pos : originalBlocks.keySet()) {
                 level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
             }
-            for (int x = -1; x <= 1; x++) {
-                for (int z = -1; z <= 1; z++) {
-                    level.setBlockAndUpdate(center.offset(x, -1, z), Blocks.IRON_BLOCK.defaultBlockState());
-                }
-            }
-            level.setBlockAndUpdate(center, Blocks.BEACON.defaultBlockState());
-            BeaconBlockEntity beacon = (BeaconBlockEntity) level.getBlockEntity(center);
-            context.assertTrue(beacon != null, "The beacon fixture must create a block entity");
-            Field primaryPower = BeaconBlockEntity.class.getDeclaredField("primaryPower");
-            primaryPower.setAccessible(true);
-            primaryPower.set(beacon, MobEffects.SPEED);
+            BeaconBlockEntity beacon = placeBeacon(context, center);
             player.setPos(Vec3.atCenterOf(center.above()));
             level.getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, false, level.getServer());
             for (int tick = 0; tick < 3; tick++) {
@@ -261,14 +340,15 @@ public final class AcceleratedDamageTimerScenarios {
             context.assertTrue(!player.hasEffect(MobEffects.SPEED),
                     "A vanilla beacon must not pulse on an eight-tick boundary");
             level.getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, true, level.getServer());
+            listener.drainSounds(SoundEvents.BEACON_AMBIENT);
             BeaconBlockEntity.tick(level, center, beacon.getBlockState(), beacon);
             context.assertTrue(player.hasEffect(MobEffects.SPEED),
                     "An accelerated beacon must grant its selected effect on an eight-tick pulse");
-        } catch (ReflectiveOperationException exception) {
-            throw new AssertionError("Could not configure the beacon's selected effect", exception);
+            context.assertTrue(listener.drainSounds(SoundEvents.BEACON_AMBIENT) == 0,
+                    "An accelerated beacon must not hum on its eight-tick pulse");
         } finally {
             player.removeEffect(MobEffects.SPEED);
-            level.getServer().getPlayerList().remove(player);
+            listener.leave(level);
             for (Map.Entry<BlockPos, BlockState> entry : originalBlocks.entrySet()) {
                 level.setBlockAndUpdate(entry.getKey(), entry.getValue());
             }
