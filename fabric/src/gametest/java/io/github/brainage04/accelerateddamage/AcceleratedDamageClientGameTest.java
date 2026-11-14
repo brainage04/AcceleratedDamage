@@ -46,6 +46,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffect;
@@ -72,6 +73,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 
 /// The showcase the owner asked for: every rule, filmed against player-shaped targets with the
 /// target's health printed in the caption after every hit, so a hit landing is visible.
@@ -127,6 +132,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final float EFFECT_TARGET_YAW = 0.0F;
 
     private static final int READING_TICKS = 14;
+
+    private static final String AIR_OBJECTIVE = "accelerateddamage_air";
 
     /// Regeneration II, the regeneration of a strong potion of regeneration (Potions.java:87-88 in
     /// the 26.3 sources).
@@ -598,6 +605,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
             float before = target.getHealth();
             target.doTick();
+            boolean underWater = target.isEyeInFluid(FluidTags.WATER);
+            // Targets are invulnerable until their marker; holding the air full until then keeps
+            // the shown air from jumping back to full at the marker.
+            if (underWater && target.isInvulnerable()) {
+                target.setAirSupply(target.getMaxAirSupply());
+            }
+            showAir(server, target, underWater);
             HealLog heals = HEAL_LOGS.get(target.getId());
             if (heals != null && target.getHealth() > before) {
                 heals.healTicks.add(serverTick);
@@ -606,11 +620,27 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (tracked.anchor() != null) {
                 target.setPos(tracked.anchor().x, tracked.anchor().y, tracked.anchor().z);
             }
-            String tag = tracked.name() + " " + Math.round(Math.max(0.0F, target.getHealth()));
-            if (target.getAirSupply() < target.getMaxAirSupply()) {
-                tag += " air " + Math.max(0, target.getAirSupply());
-            }
-            target.setCustomName(Component.literal(tag));
+            target.setCustomName(
+                    Component.literal(
+                            tracked.name() + " " + Math.round(Math.max(0.0F, target.getHealth()))));
+        }
+    }
+
+    /// Puts a target's air on its below-name line while its eyes are under water, and takes the
+    /// line away otherwise. The client draws a player-shaped target's profile name as its name tag,
+    /// never its custom name (client Player.java:1633-1635, 1682-1684 and
+    /// EntityRenderer.java:140-141 in the 26.3 sources), so a reading can only show on the
+    /// below-name scoreboard line (client Entity.java:3422-3430).
+    private static void showAir(MinecraftServer server, ServerPlayer target, boolean underWater) {
+        Scoreboard scoreboard = server.getScoreboard();
+        Objective air = scoreboard.getObjective(AIR_OBJECTIVE);
+        if (air == null) {
+            return;
+        }
+        if (underWater) {
+            scoreboard.getOrCreatePlayerScore(target, air).set(Math.max(0, target.getAirSupply()));
+        } else {
+            scoreboard.resetSinglePlayerScore(target, air);
         }
     }
 
@@ -623,6 +653,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // player-versus-player damage in ServerPlayer#hurtServer, so the showcase world runs with
         // the rule on.
         level.getGameRules().set(GameRules.PVP, true, server);
+        Scoreboard scoreboard = server.getScoreboard();
+        scoreboard.setDisplayObjective(
+                DisplaySlot.BELOW_NAME,
+                scoreboard.addObjective(
+                        AIR_OBJECTIVE,
+                        ObjectiveCriteria.DUMMY,
+                        Component.literal("air"),
+                        ObjectiveCriteria.RenderType.INTEGER,
+                        false,
+                        null));
         for (int x = -10; x <= 16; x++) {
             for (int z = -46; z <= 10; z++) {
                 level.setBlockAndUpdate(
@@ -1155,6 +1195,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                             new Vec3(6.5, ARENA_Y, -12.5))
                                     : previous.get(6);
                     int drowning = placeTarget(current, "Drowning", new Vec3(-1.5, ARENA_Y, -17.5));
+                    // The camera stands about 15 blocks from the tank, past the default 10 within
+                    // which the client draws the below-name line (Attributes.java:22-24).
+                    living(current, drowning)
+                            .getAttribute(Attributes.BELOW_NAME_DISTANCE)
+                            .setBaseValue(32.0);
                     LivingEntity fish = living(current, drying);
                     fish.getAttribute(Attributes.MAX_HEALTH).setBaseValue(EFFECT_TARGET_HEALTH);
                     fish.setHealth(EFFECT_TARGET_HEALTH);
@@ -1168,10 +1213,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     setDamageEffects(current, targets);
                     living(current, targets.get(4)).setTicksFrozen(0);
                     living(current, targets.get(6)).setAirSupply(0);
-                    // The tank drains the air from its placing on; the curve starts full at the
-                    // marker.
-                    LivingEntity drowning = living(current, targets.get(7));
-                    drowning.setAirSupply(drowning.getMaxAirSupply());
                 });
     }
 
@@ -1400,7 +1441,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return living(server, shown.get(scene.names().indexOf(healer)));
     }
 
-    /// The air of every target under water, for the take's log; the name tags show it on screen.
+    /// The air of every target under water, for the take's log; the below-name line shows it on
+    /// screen.
     private static String airLine(MinecraftServer server, List<Integer> shown, EffectScene scene) {
         StringBuilder line = new StringBuilder();
         for (String name : scene.underWater()) {
@@ -1946,6 +1988,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         TRACKED.clear();
         hitLog = null;
         FED.clear();
+        Objective air = server.getScoreboard().getObjective(AIR_OBJECTIVE);
+        if (air != null) {
+            server.getScoreboard().removeObjective(air);
+        }
         HEAL_LOGS.clear();
         for (ServerPlayer player : List.copyOf(server.getPlayerList().getPlayers())) {
             if (player.getCustomName() != null) {
