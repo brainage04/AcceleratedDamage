@@ -17,6 +17,8 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.allay.Allay;
 import net.minecraft.world.entity.animal.axolotl.Axolotl;
 import net.minecraft.world.entity.animal.cow.Cow;
@@ -62,15 +64,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         context.waitTicks(2);
                         float firstHealth =
                                 server.computeOnServer(
-                                        current ->
-                                                findTarget(
-                                                                current.overworld(),
-                                                                "Rapid melee target")
-                                                        .getHealth());
-                        if (firstHealth >= 10.0F) {
-                            throw new AssertionError(
-                                    "Expected a real client attack packet to damage the melee target.");
-                        }
+                                        current -> {
+                                            Cow target =
+                                                    findTarget(
+                                                            current.overworld(),
+                                                            "Rapid melee target");
+                                            if (target.getHealth() >= target.getMaxHealth()) {
+                                                throw new AssertionError(
+                                                        "Expected a real client attack packet to damage the melee target.");
+                                            }
+                                            return target.getHealth();
+                                        });
                         context.getInput().pressKey(options -> options.keyAttack);
                         context.waitTicks(2);
                         server.runOnServer(
@@ -343,6 +347,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (target == null) {
             throw new AssertionError("Expected to create showcase target " + label + ".");
         }
+        // A cow has 10 health and a crit arrow rolls up to 10 damage (AbstractArrow.onHitEntity,
+        // dec/server-26.2 AbstractArrow.java:436, :454-457), so a target can die before the step
+        // that checks it was damaged. The steps only need the target to survive one hit.
+        AttributeInstance maxHealth = target.getAttribute(Attributes.MAX_HEALTH);
+        if (maxHealth == null) {
+            throw new AssertionError("Expected a cow to have a max health attribute.");
+        }
+        maxHealth.setBaseValue(100.0);
+        target.setHealth(100.0F);
         target.setPos(x, y, z);
         target.setNoAi(true);
         target.setCustomName(Component.literal(label));
