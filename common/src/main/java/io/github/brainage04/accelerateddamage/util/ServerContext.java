@@ -6,8 +6,7 @@ import org.jetbrains.annotations.Nullable;
 public final class ServerContext {
     private static MinecraftServer server;
 
-    private ServerContext() {
-    }
+    private ServerContext() {}
 
     public static void set(MinecraftServer currentServer) {
         server = currentServer;
