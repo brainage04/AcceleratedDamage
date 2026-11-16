@@ -25,21 +25,18 @@ public abstract class TridentItemMixin {
         if (server == null) {
             return original;
         }
-        // Riptide launches the player by movement only the client applies: the server's push is not
-        // sent back to the
-        // pushing player (ServerEntity.java:177-195, 26.2), and a vanilla client keeps the 10-tick
-        // minimum
-        // (TridentItem.java:65), so a shorter release would spin the player in place on a dedicated
-        // server.
+        // Riptide launches the player by movement only the client applies: the server's push is
+        // not sent back to the pushing player (ServerEntity.java:177-195, 26.2), and a vanilla
+        // client keeps the 10-tick minimum (TridentItem.java:65), so a shorter release would spin
+        // the player in place on a dedicated server.
         if (EnchantmentHelper.getTridentSpinAttackStrength(stack, entity) > 0.0F) {
             return original;
         }
         if (server.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
             return 0;
         }
-        // The 10-tick minimum throw time (TridentItem.java:65, 26.3) is an attack interval, so the
-        // compressed
-        // timeline takes it to one tick. A tenth of 10 is 1, so nothing is rounded away.
+        // The 10-tick minimum throw time (TridentItem.java:65, 26.2) is an attack interval, so the
+        // compressed timeline takes it to one tick. A tenth of 10 is 1, so nothing is rounded away.
         return VirtualTime.isEnabled()
                 ? Math.max(1, original / VirtualTime.ACCELERATION)
                 : original;
