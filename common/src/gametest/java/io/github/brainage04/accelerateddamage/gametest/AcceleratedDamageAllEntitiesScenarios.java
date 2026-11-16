@@ -38,6 +38,10 @@ public final class AcceleratedDamageAllEntitiesScenarios {
     private AcceleratedDamageAllEntitiesScenarios() {
     }
 
+    // GameTestHelper.makeMockServerPlayerInLevel is @Deprecated(forRemoval = true)
+    // (dec/server-26.3 GameTestHelper.java:395, :396) and none of the replacements puts
+    // the player in the level or the player list; this test needs both.
+    @SuppressWarnings("removal")
     public static void everyEntityAttacksAndTakesDamageTenTimesFaster(GameTestHelper context) {
         ServerLevel level = context.getLevel();
         MinecraftServer server = level.getServer();
