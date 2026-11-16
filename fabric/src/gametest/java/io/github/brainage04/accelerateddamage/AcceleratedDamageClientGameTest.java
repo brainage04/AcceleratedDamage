@@ -19,6 +19,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.animal.allay.Allay;
 import net.minecraft.world.entity.animal.axolotl.Axolotl;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -146,9 +147,62 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 "A trident clears its vanilla minimum use time and damages its marked target");
                         tapWeapon(context, server, "Trident target", 3, false);
                         context.waitTicks(20);
+
+                        ClientGameTestRecorder.showStep(
+                                context,
+                                "showcase.accelerated-spear",
+                                "A spear stabs on the accelerated cooldown",
+                                "The vanilla client's own attack gate accepts the stab after three ticks");
+                        assertClientSpearGateIsAccelerated(context, server);
+                        context.waitTicks(20);
                     } finally {
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
+                });
+    }
+
+    /**
+     * The client's own minimum-charge gate ({@code Minecraft.java:1627}, 26.2) is what a spear
+     * waits on, and a spear's {@code MINIMUM_ATTACK_CHARGE} is 1.0 ({@code Item.java:526}). The
+     * client reads the attack speed the server synced, so a few ticks after the spear arrives it
+     * must accept the stab; with the vanilla delay it would refuse for 23 ticks.
+     */
+    private static void assertClientSpearGateIsAccelerated(
+            ClientGameTestContext context,
+            net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server) {
+        server.runOnServer(
+                current -> {
+                    ServerLevel level = current.overworld();
+                    ServerPlayer player = current.getPlayerList().getPlayers().getFirst();
+                    level.getGameRules().set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
+                    player.getInventory().setSelectedSlot(4);
+                    player.connection.send(new ClientboundSetHeldSlotPacket(4));
+                    player.getInventory().setItem(4, new ItemStack(Items.NETHERITE_SPEAR));
+                    player.resetAttackStrengthTicker();
+                });
+        // The client resets its own attack-strength ticker when the held item changes, so it needs
+        // a few ticks after the spear arrives; a spear's vanilla delay is 23 ticks, far more.
+        context.waitTicks(8);
+        context.computeOnClient(
+                client -> {
+                    if (client.player == null) {
+                        throw new AssertionError("Expected the client player to be available.");
+                    }
+                    ItemStack held = client.player.getMainHandItem();
+                    if (!held.is(Items.NETHERITE_SPEAR)) {
+                        throw new AssertionError(
+                                "Expected the client to hold the spear, found " + held);
+                    }
+                    if (client.player.cannotAttackWithItem(held, 0)) {
+                        throw new AssertionError(
+                                "Expected the vanilla client to accept a spear stab on the"
+                                        + " accelerated delay; it still holds the vanilla one."
+                                        + " Client attack speed "
+                                        + client.player.getAttributeValue(Attributes.ATTACK_SPEED)
+                                        + ", charge "
+                                        + client.player.getAttackStrengthScale(0.0F));
+                    }
+                    return held;
                 });
     }
 
@@ -179,6 +233,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         player.getInventory().setItem(1, new ItemStack(Items.BOW));
         player.getInventory().setItem(2, new ItemStack(Items.CROSSBOW));
         player.getInventory().setItem(3, new ItemStack(Items.TRIDENT));
+        player.getInventory().setItem(4, new ItemStack(Items.NETHERITE_SPEAR));
         player.getInventory().setItem(9, new ItemStack(Items.ARROW, 32));
         player.setCustomName(Component.literal("Accelerated fighter"));
 

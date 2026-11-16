@@ -2,6 +2,7 @@ package io.github.brainage04.accelerateddamage;
 
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageAllEntitiesScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamagePlayerAttackSpeedScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -72,5 +73,16 @@ public final class AcceleratedDamageGameTest {
     public void everyEntityAttacksAndTakesDamageTenTimesFaster(GameTestHelper context) {
         AcceleratedDamageAllEntitiesScenarios.everyEntityAttacksAndTakesDamageTenTimesFaster(
                 context);
+    }
+
+    @GameTest(environment = "accelerateddamage:all_entities", maxTicks = 200)
+    public void playerAttackSpeedIsSyncedToTheClient(GameTestHelper context) {
+        AcceleratedDamagePlayerAttackSpeedScenarios.playerAttackSpeedIsSyncedToTheClient(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:all_entities", maxTicks = 200)
+    public void playerAttackSpeedSurvivesJoinRespawnAndDimensionChange(GameTestHelper context) {
+        AcceleratedDamagePlayerAttackSpeedScenarios
+                .playerAttackSpeedSurvivesJoinRespawnAndDimensionChange(context);
     }
 }

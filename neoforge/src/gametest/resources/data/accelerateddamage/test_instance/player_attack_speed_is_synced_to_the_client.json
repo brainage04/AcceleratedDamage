@@ -1,0 +1,7 @@
+{
+  "environment": "accelerateddamage:all_entities",
+  "structure": "minecraftmodconventions:empty",
+  "max_ticks": 200,
+  "type": "minecraft:function",
+  "function": "accelerateddamage:player_attack_speed_is_synced_to_the_client"
+}

@@ -3,6 +3,7 @@ package io.github.brainage04.accelerateddamage.neoforge;
 import io.github.brainage04.accelerateddamage.AcceleratedDamage;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageAllEntitiesScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamagePlayerAttackSpeedScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -72,6 +73,18 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () ->
                         AcceleratedDamageAllEntitiesScenarios
                                 ::everyEntityAttacksAndTakesDamageTenTimesFaster);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("player_attack_speed_is_synced_to_the_client"),
+                () ->
+                        AcceleratedDamagePlayerAttackSpeedScenarios
+                                ::playerAttackSpeedIsSyncedToTheClient);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("player_attack_speed_survives_join_respawn_and_dimension_change"),
+                () ->
+                        AcceleratedDamagePlayerAttackSpeedScenarios
+                                ::playerAttackSpeedSurvivesJoinRespawnAndDimensionChange);
     }
 
     private static Identifier id(String path) {
