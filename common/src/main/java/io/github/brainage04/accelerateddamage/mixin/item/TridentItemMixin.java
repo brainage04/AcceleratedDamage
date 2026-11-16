@@ -2,6 +2,7 @@ package io.github.brainage04.accelerateddamage.mixin.item;
 
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import io.github.brainage04.accelerateddamage.util.ServerContext;
+import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -26,12 +27,20 @@ public abstract class TridentItemMixin {
             int remainingTime
     ) {
         MinecraftServer server = ServerContext.get();
-        if (server == null || !server.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
+        if (server == null) {
             return original;
         }
         // Riptide launches the player by movement only the client applies: the server's push is not sent back to the
         // pushing player (ServerEntity.java:177-195, 26.2), and a vanilla client keeps the 10-tick minimum
         // (TridentItem.java:65), so a shorter release would spin the player in place on a dedicated server.
-        return EnchantmentHelper.getTridentSpinAttackStrength(stack, entity) > 0.0F ? original : 0;
+        if (EnchantmentHelper.getTridentSpinAttackStrength(stack, entity) > 0.0F) {
+            return original;
+        }
+        if (server.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
+            return 0;
+        }
+        // The 10-tick minimum throw time (TridentItem.java:65, 26.3) is an attack interval, so the compressed
+        // timeline takes it to one tick. A tenth of 10 is 1, so nothing is rounded away.
+        return VirtualTime.isEnabled() ? Math.max(1, original / VirtualTime.ACCELERATION) : original;
     }
 }

@@ -19,9 +19,10 @@ import net.minecraft.world.entity.animal.golem.IronGolem;
 import net.minecraft.world.entity.animal.golem.SnowGolem;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.Snowball;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.GameType;
+import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 
@@ -46,40 +47,71 @@ public final class AcceleratedDamageAllEntitiesScenarios {
         try {
             setRule(rules, server, false);
             player = context.makeMockServerPlayerInLevel();
-            player.setGameMode(GameType.SURVIVAL);
+            // The mock player is CREATIVE (GameType.java:62-66, 26.2), which makes it invulnerable, and its
+            // connection still waits for the client to load (ServerPlayer.java:1279-1280, 26.2), which makes it
+            // immune to every source until the 60-tick timeout runs out (ServerGamePacketListenerImpl.java:2214-2216).
+            player.getAbilities().invulnerable = false;
+            player.setInvulnerable(false);
+            for (int tick = 0; tick < 60; tick++) {
+                player.connection.tickClientLoadTimeout();
+            }
             player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
 
-            float vanillaDelay = player.getCurrentItemAttackStrengthDelay();
-            assertTrue(vanillaDelay > 2.0F, "Expected a vanilla sword to need more than two ticks to charge");
+            // The held item's ATTACK_SPEED modifier reaches the attribute on the player's next tick.
             player.resetAttackStrengthTicker();
             player.doTick();
             player.doTick();
+            float vanillaDelay = player.getCurrentItemAttackStrengthDelay();
+            assertTrue(vanillaDelay > 2.0F, "Expected a vanilla sword to need more than two ticks to charge");
             assertTrue(player.getAttackStrengthScale(0.0F) < 1.0F,
                     "Expected a vanilla sword not to be charged after two ticks");
 
+            int vanillaDraw = playerTicksToDrawBow(player);
+            int vanillaThrow = playerTicksToThrowTrident(level, player);
+            player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+            player.doTick();
             int vanillaMelee = meleeTicksBetweenHits(context);
             int vanillaRanged = rangedTicksBetweenShots(context);
             int vanillaMobIntake = mobTicksUntilSecondHit(context);
             int vanillaPlayerIntake = playerTicksUntilSecondHit(level, player);
+            assertTrue(vanillaDraw > 0 && vanillaThrow > 0 && vanillaMelee > 0 && vanillaRanged > 0
+                            && vanillaMobIntake > 0 && vanillaPlayerIntake > 0,
+                    "Expected every vanilla interval to be measurable: draw=" + vanillaDraw
+                            + ", throw=" + vanillaThrow + ", melee=" + vanillaMelee + ", ranged=" + vanillaRanged
+                            + ", mob intake=" + vanillaMobIntake + ", player intake=" + vanillaPlayerIntake);
 
             setRule(rules, server, true);
 
-            assertEquals(vanillaDelay / 10.0F, player.getCurrentItemAttackStrengthDelay(),
-                    "Expected the attack delay to be a tenth of vanilla");
+            player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
+            player.doTick();
+            float acceleratedDelay = player.getCurrentItemAttackStrengthDelay();
             player.resetAttackStrengthTicker();
             player.doTick();
             player.doTick();
-            assertEquals(1.0F, player.getAttackStrengthScale(0.0F),
-                    "Expected an accelerated sword to be fully charged after two ticks");
+            float acceleratedCharge = player.getAttackStrengthScale(0.0F);
+            int acceleratedDraw = playerTicksToDrawBow(player);
+            int acceleratedThrow = playerTicksToThrowTrident(level, player);
+            int acceleratedMelee = meleeTicksBetweenHits(context);
+            int acceleratedRanged = rangedTicksBetweenShots(context);
+            int acceleratedMobIntake = mobTicksUntilSecondHit(context);
+            int acceleratedPlayerIntake = playerTicksUntilSecondHit(level, player);
 
-            assertEquals(vanillaMelee / 10, meleeTicksBetweenHits(context),
-                    "Expected a melee mob to attack ten times as often");
-            assertEquals(vanillaRanged / 10, rangedTicksBetweenShots(context),
-                    "Expected a ranged mob to shoot ten times as often");
-            assertEquals(vanillaMobIntake / 10, mobTicksUntilSecondHit(context),
-                    "Expected a mob to take a second hit ten times sooner");
-            assertEquals(vanillaPlayerIntake / 10, playerTicksUntilSecondHit(level, player),
-                    "Expected a player to take a second hit ten times sooner");
+            // Every interval is reported in one failure, so a run shows all of them at once.
+            StringBuilder mismatches = new StringBuilder();
+            expectTenth(mismatches, "player attack delay", vanillaDelay, acceleratedDelay);
+            expectTenth(mismatches, "player bow draw", vanillaDraw, acceleratedDraw);
+            expectTenth(mismatches, "player trident throw", vanillaThrow, acceleratedThrow);
+            expectTenth(mismatches, "melee mob hit spacing", vanillaMelee, acceleratedMelee);
+            expectTenth(mismatches, "ranged mob shot spacing", vanillaRanged, acceleratedRanged);
+            expectTenth(mismatches, "mob damage window", vanillaMobIntake, acceleratedMobIntake);
+            expectTenth(mismatches, "player damage window", vanillaPlayerIntake, acceleratedPlayerIntake);
+            if (Float.compare(acceleratedCharge, 1.0F) != 0) {
+                mismatches.append("; a sword must be fully charged after two accelerated ticks, found ")
+                        .append(acceleratedCharge);
+            }
+            if (!mismatches.isEmpty()) {
+                throw new GameTestAssertException(Component.literal(mismatches.substring(2)), 0);
+            }
         } finally {
             setRule(rules, server, false);
             if (player != null && server.getPlayerList().getPlayer(player.getUUID()) != null) {
@@ -88,6 +120,44 @@ public final class AcceleratedDamageAllEntitiesScenarios {
         }
 
         context.succeed();
+    }
+
+    /** Ticks a player needs to reach a full-power bow draw ({@code BowItem.getPowerForTime} 1.0). */
+    private static int playerTicksToDrawBow(ServerPlayer player) {
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BOW));
+        player.getInventory().setItem(9, new ItemStack(Items.ARROW, 16));
+        player.startUsingItem(InteractionHand.MAIN_HAND);
+        try {
+            for (int tick = 1; tick <= 40; tick++) {
+                // ServerPlayer.tick runs only the connection half; the item-use countdown is in doTick.
+                player.doTick();
+                if (BowItem.getPowerForTime(player.getTicksUsingItem()) >= 1.0F) {
+                    return tick;
+                }
+            }
+            return -1;
+        } finally {
+            player.stopUsingItem();
+        }
+    }
+
+    /**
+     * Ticks a player must hold a trident before {@code TridentItem.releaseUsing} throws it, measured by the
+     * vanilla 10-tick minimum ({@code TridentItem.java:65}, 26.2) through the item's own release path.
+     */
+    private static int playerTicksToThrowTrident(ServerLevel level, ServerPlayer player) {
+        for (int held = 1; held <= 20; held++) {
+            ItemStack trident = new ItemStack(Items.TRIDENT);
+            player.setItemInHand(InteractionHand.MAIN_HAND, trident);
+            trident.use(level, player, InteractionHand.MAIN_HAND);
+            if (((TridentItem) Items.TRIDENT).releaseUsing(
+                    trident, level, player, trident.getUseDuration(player) - held)) {
+                player.stopUsingItem();
+                return held;
+            }
+            player.stopUsingItem();
+        }
+        return -1;
     }
 
     /** Ticks from a melee mob's first landed hit to its second, with the damage window held open. */
@@ -179,6 +249,7 @@ public final class AcceleratedDamageAllEntitiesScenarios {
     /** Server ticks until a player accepts a second hit of the same size from the same source. */
     private static int playerTicksUntilSecondHit(ServerLevel level, ServerPlayer player) {
         player.setHealth(20.0F);
+        player.invulnerableTime = 0;
         assertTrue(player.hurtServer(level, level.damageSources().cactus(), 1.0F),
                 "Expected the first contact hit to apply to the player");
         for (int tick = 1; tick <= 30; tick++) {
@@ -205,6 +276,18 @@ public final class AcceleratedDamageAllEntitiesScenarios {
 
     private static void setRule(GameRules rules, MinecraftServer server, boolean fasterEffectTicking) {
         rules.set(ModGameRules.FASTER_EFFECT_TICKING, fasterEffectTicking, server);
+    }
+
+    private static void expectTenth(
+            StringBuilder mismatches,
+            String interval,
+            float vanilla,
+            float accelerated
+    ) {
+        if (Float.compare(vanilla / 10.0F, accelerated) != 0) {
+            mismatches.append("; ").append(interval).append(" must be a tenth of vanilla ")
+                    .append(vanilla).append(", found ").append(accelerated);
+        }
     }
 
     private static void assertTrue(boolean condition, String message) {

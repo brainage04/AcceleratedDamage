@@ -3,7 +3,6 @@ package io.github.brainage04.accelerateddamage.mixin.entity.attack.goal;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ProjectileWeaponItem;
 import org.objectweb.asm.Opcodes;
@@ -13,11 +12,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Mob bow draw and crossbow charge. Advancing the use countdown makes {@code getTicksUsingItem()}
- * count virtual ticks, so bow power ({@code BowItem.getPowerForTime}) and crossbow charge
- * ({@code CrossbowItem.getChargeDuration}) come out right for goal and brain users alike.
- * Limited to non-player mobs using a {@link ProjectileWeaponItem}: players, drinking, eating,
- * tridents and kinetic (spear) weapons keep vanilla item-use speed.
+ * Bow draw and crossbow charge for every entity, players included. Advancing the use countdown makes
+ * {@code getTicksUsingItem()} count virtual ticks, so bow power ({@code BowItem.getPowerForTime}) and
+ * crossbow charge ({@code CrossbowItem.getChargeDuration}) come out right for goal and brain users alike.
+ * Limited to {@link ProjectileWeaponItem} users: drinking, eating, shields, tridents and kinetic (spear)
+ * weapons keep vanilla item-use speed.
  */
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityItemUseMixin {
@@ -41,8 +40,7 @@ public abstract class LivingEntityItemUseMixin {
             )
     )
     private int acceleratedDamage$drawWeaponFaster(LivingEntity self) {
-        if (!(self instanceof Mob)
-                || !(this.useItem.getItem() instanceof ProjectileWeaponItem)
+        if (!(this.useItem.getItem() instanceof ProjectileWeaponItem)
                 || this.useItem.has(DataComponents.KINETIC_WEAPON)
                 || !VirtualTime.isEnabled(self.level())) {
             return this.useItemRemaining;
