@@ -1,6 +1,7 @@
 package io.github.brainage04.accelerateddamage.neoforge;
 
 import io.github.brainage04.accelerateddamage.AcceleratedDamage;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageAllEntitiesScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -40,6 +41,8 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 () -> AcceleratedDamageTimerScenarios::healingMeleeAndRamCooldowns);
         event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("beacon_and_conduit_pulses"),
                 () -> AcceleratedDamageTimerScenarios::beaconAndConduitPulses);
+        event.register(BuiltInRegistries.TEST_FUNCTION.key(), id("every_entity_attacks_and_takes_damage_ten_times_faster"),
+                () -> AcceleratedDamageAllEntitiesScenarios::everyEntityAttacksAndTakesDamageTenTimesFaster);
     }
 
     private static Identifier id(String path) {

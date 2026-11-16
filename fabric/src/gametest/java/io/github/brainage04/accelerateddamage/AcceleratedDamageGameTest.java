@@ -1,5 +1,6 @@
 package io.github.brainage04.accelerateddamage;
 
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageAllEntitiesScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -64,5 +65,10 @@ public final class AcceleratedDamageGameTest {
     @GameTest(environment = "accelerateddamage:fire_and_freeze", maxTicks = 100)
     public void beaconAndConduitPulses(GameTestHelper context) {
         AcceleratedDamageTimerScenarios.beaconAndConduitPulses(context);
+    }
+
+    @GameTest(environment = "accelerateddamage:all_entities", maxTicks = 200)
+    public void everyEntityAttacksAndTakesDamageTenTimesFaster(GameTestHelper context) {
+        AcceleratedDamageAllEntitiesScenarios.everyEntityAttacksAndTakesDamageTenTimesFaster(context);
     }
 }
