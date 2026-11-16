@@ -91,6 +91,10 @@ public final class AcceleratedDamageTimerScenarios {
         context.succeed();
     }
 
+    // GameTestHelper.makeMockServerPlayerInLevel is @Deprecated(forRemoval = true)
+    // (dec/server-26.3 GameTestHelper.java:395, :396) and none of the replacements puts
+    // the player in the level or the player list; these tests need both.
+    @SuppressWarnings("removal")
     public static void hungerAndStingingAndCreeperFuses(GameTestHelper context) {
         ServerLevel level = context.getLevel();
         boolean previous = level.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING);

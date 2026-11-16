@@ -454,6 +454,10 @@ public final class AcceleratedDamageGameTestScenarios {
         context.succeed();
     }
 
+    // GameTestHelper.makeMockServerPlayerInLevel is @Deprecated(forRemoval = true)
+    // (dec/server-26.3 GameTestHelper.java:395, :396) and none of the replacements puts
+    // the player in the level or the player list; these tests need both.
+    @SuppressWarnings("removal")
     public static void attackCooldownIsImmediateForExistingAndJoiningPlayers(
             GameTestHelper context) {
         ServerLevel level = context.getLevel();
@@ -510,6 +514,10 @@ public final class AcceleratedDamageGameTestScenarios {
         context.succeed();
     }
 
+    // GameTestHelper.makeMockServerPlayerInLevel is @Deprecated(forRemoval = true)
+    // (dec/server-26.3 GameTestHelper.java:395, :396) and none of the replacements puts
+    // the player in the level or the player list; these tests need both.
+    @SuppressWarnings("removal")
     public static void instantShootFiresBowCrossbowAndTrident(GameTestHelper context) {
         ServerLevel level = context.getLevel();
         MinecraftServer server = level.getServer();
