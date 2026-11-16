@@ -10,22 +10,24 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(Creeper.class)
 public abstract class CreeperMixin {
-    @Shadow
-    private int swell;
+    @Shadow private int swell;
 
-    /** Fuse {@code swell += swellDir} toward {@code maxSwell} (30); vanilla clamps the result right after. */
+    /**
+     * Fuse {@code swell += swellDir} toward {@code maxSwell} (30); vanilla clamps the result right
+     * after.
+     */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/monster/Creeper;swell:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/monster/Creeper;swell:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$swellFaster(Creeper self, int vanillaValue) {
-        swell = VirtualTime.isEnabled(self.level())
-                ? swell + (vanillaValue - swell) * VirtualTime.ACCELERATION
-                : vanillaValue;
+        swell =
+                VirtualTime.isEnabled(self.level())
+                        ? swell + (vanillaValue - swell) * VirtualTime.ACCELERATION
+                        : vanillaValue;
     }
 }

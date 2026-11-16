@@ -13,9 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public class BowItemMixin {
     @Inject(method = "getPowerForTime(I)F", at = @At("HEAD"), cancellable = true)
     private static void acceleratedDamage$chargeImmediately(
-            int useTicks,
-            CallbackInfoReturnable<Float> cir
-    ) {
+            int useTicks, CallbackInfoReturnable<Float> cir) {
         MinecraftServer server = ServerContext.get();
         if (server != null && server.getGameRules().get(ModGameRules.INSTANT_SHOOT)) {
             cir.setReturnValue(1.0F);

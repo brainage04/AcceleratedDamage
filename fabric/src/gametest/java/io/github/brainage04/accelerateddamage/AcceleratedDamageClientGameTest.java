@@ -3,6 +3,8 @@ package io.github.brainage04.accelerateddamage;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestRecorder;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
+import java.util.Properties;
+import java.util.Set;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
@@ -11,21 +13,17 @@ import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.entity.animal.allay.Allay;
 import net.minecraft.world.entity.animal.axolotl.Axolotl;
+import net.minecraft.world.entity.animal.cow.Cow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
-
-import java.util.Properties;
-import java.util.Set;
 
 @SuppressWarnings("UnstableApiUsage")
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
@@ -50,39 +48,47 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.ready",
                                 "Accelerated Damage showcase",
-                                "Every gamerule is exercised against live entities on a dedicated server"
-                        );
+                                "Every gamerule is exercised against live entities on a dedicated server");
                         context.waitTicks(30);
 
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.rapid-melee",
                                 "Immediate attacks and no invincibility frames",
-                                "The player performs two real sword attacks; both must damage the target"
-                        );
+                                "The player performs two real sword attacks; both must damage the target");
                         server.runOnServer(AcceleratedDamageClientGameTest::prepareRapidAttacks);
                         context.waitTicks(10);
                         context.getInput().pressKey(options -> options.keyAttack);
                         context.waitTicks(2);
-                        float firstHealth = server.computeOnServer(current -> findTarget(current.overworld(), "Rapid melee target").getHealth());
+                        float firstHealth =
+                                server.computeOnServer(
+                                        current ->
+                                                findTarget(
+                                                                current.overworld(),
+                                                                "Rapid melee target")
+                                                        .getHealth());
                         if (firstHealth >= 10.0F) {
-                            throw new AssertionError("Expected a real client attack packet to damage the melee target.");
+                            throw new AssertionError(
+                                    "Expected a real client attack packet to damage the melee target.");
                         }
                         context.getInput().pressKey(options -> options.keyAttack);
                         context.waitTicks(2);
-                        server.runOnServer(current -> {
-                            if (findTarget(current.overworld(), "Rapid melee target").getHealth() >= firstHealth) {
-                                throw new AssertionError("Expected consecutive client attack packets to bypass invincibility.");
-                            }
-                        });
+                        server.runOnServer(
+                                current -> {
+                                    if (findTarget(current.overworld(), "Rapid melee target")
+                                                    .getHealth()
+                                            >= firstHealth) {
+                                        throw new AssertionError(
+                                                "Expected consecutive client attack packets to bypass invincibility.");
+                                    }
+                                });
                         context.waitTicks(25);
 
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.effects",
                                 "Ten-times-faster environmental and status effects",
-                                "Fire, freezing, poison, and wither damage accelerate; the speed icon demonstrates client duration sync"
-                        );
+                                "Fire, freezing, poison, and wither damage accelerate; the speed icon demonstrates client duration sync");
                         server.runOnServer(AcceleratedDamageClientGameTest::startEffectGallery);
                         context.waitTicks(20);
                         server.runOnServer(AcceleratedDamageClientGameTest::assertEffectGallery);
@@ -93,49 +99,57 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.healing-and-air",
                                 "Healing and drying share the accelerated timeline",
-                                "The injured allay heals while the axolotl runs out of air on dry land"
-                        );
-                        server.runOnServer(AcceleratedDamageClientGameTest::startHealingAndAirGallery);
+                                "The injured allay heals while the axolotl runs out of air on dry land");
+                        server.runOnServer(
+                                AcceleratedDamageClientGameTest::startHealingAndAirGallery);
                         context.waitTicks(20);
-                        server.runOnServer(current -> {
-                            ServerLevel level = current.overworld();
-                            Allay allay = level.getEntitiesOfClass(Allay.class, new net.minecraft.world.phys.AABB(-10, 62, -10, 15, 70, 10)).getFirst();
-                            Axolotl axolotl = level.getEntitiesOfClass(Axolotl.class, allay.getBoundingBox().inflate(10)).getFirst();
-                            if (allay.getHealth() <= 5.0F || axolotl.getHealth() >= axolotl.getMaxHealth()) {
-                                throw new AssertionError("Expected visible accelerated healing and drying damage.");
-                            }
-                        });
+                        server.runOnServer(
+                                current -> {
+                                    ServerLevel level = current.overworld();
+                                    Allay allay =
+                                            level.getEntitiesOfClass(
+                                                            Allay.class,
+                                                            new net.minecraft.world.phys.AABB(
+                                                                    -10, 62, -10, 15, 70, 10))
+                                                    .getFirst();
+                                    Axolotl axolotl =
+                                            level.getEntitiesOfClass(
+                                                            Axolotl.class,
+                                                            allay.getBoundingBox().inflate(10))
+                                                    .getFirst();
+                                    if (allay.getHealth() <= 5.0F
+                                            || axolotl.getHealth() >= axolotl.getMaxHealth()) {
+                                        throw new AssertionError(
+                                                "Expected visible accelerated healing and drying damage.");
+                                    }
+                                });
                         context.waitTicks(20);
 
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.instant-bow",
                                 "One-tick bow shot",
-                                "A real one-tick bow draw fires at and damages the marked target"
-                        );
+                                "A real one-tick bow draw fires at and damages the marked target");
                         tapWeapon(context, server, "Bow target", 1, false);
 
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.instant-crossbow",
                                 "One-tick crossbow shot",
-                                "A crossbow loads, fires, and damages its marked target after one tick"
-                        );
+                                "A crossbow loads, fires, and damages its marked target after one tick");
                         tapWeapon(context, server, "Crossbow target", 2, true);
 
                         ClientGameTestRecorder.showStep(
                                 context,
                                 "showcase.instant-trident",
                                 "One-tick trident throw",
-                                "A trident clears its vanilla minimum use time and damages its marked target"
-                        );
+                                "A trident clears its vanilla minimum use time and damages its marked target");
                         tapWeapon(context, server, "Trident target", 3, false);
                         context.waitTicks(20);
                     } finally {
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
-                }
-        );
+                });
     }
 
     private static void prepareRange(MinecraftServer server) {
@@ -147,15 +161,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             for (int z = -7; z <= 8; z++) {
                 level.setBlockAndUpdate(
                         new net.minecraft.core.BlockPos(x, ARENA_Y - 1, z),
-                        (z & 1) == 0 ? Blocks.STONE.defaultBlockState() : Blocks.DEEPSLATE.defaultBlockState()
-                );
+                        (z & 1) == 0
+                                ? Blocks.STONE.defaultBlockState()
+                                : Blocks.DEEPSLATE.defaultBlockState());
             }
         }
         for (int x = -8; x <= 12; x++) {
             level.setBlockAndUpdate(
                     new net.minecraft.core.BlockPos(x, ARENA_Y - 1, 0),
-                    Blocks.GLOWSTONE.defaultBlockState()
-            );
+                    Blocks.GLOWSTONE.defaultBlockState());
         }
 
         player.teleportTo(level, -6.5, ARENA_Y, 0.5, Set.of(), -90.0F, 0.0F, false);
@@ -209,8 +223,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Cow freeze = findTarget(level, "Freeze target");
         freeze.setTicksFrozen(freeze.getTicksRequiredToFreeze() + 400);
 
-        findTarget(level, "Poison target").addEffect(new MobEffectInstance(MobEffects.POISON, 240, 1));
-        findTarget(level, "Wither target").addEffect(new MobEffectInstance(MobEffects.WITHER, 240, 1));
+        findTarget(level, "Poison target")
+                .addEffect(new MobEffectInstance(MobEffects.POISON, 240, 1));
+        findTarget(level, "Wither target")
+                .addEffect(new MobEffectInstance(MobEffects.WITHER, 240, 1));
         player.addEffect(new MobEffectInstance(MobEffects.SPEED, 400));
         player.teleportTo(level, -6.5, ARENA_Y, 0.5, Set.of(), -90.0F, 0.0F, false);
     }
@@ -244,38 +260,51 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         assertTargetDamaged(server, "Poison target");
         assertTargetDamaged(server, "Wither target");
 
-        MobEffectInstance effect = server.getPlayerList().getPlayers().getFirst().getEffect(MobEffects.SPEED);
+        MobEffectInstance effect =
+                server.getPlayerList().getPlayers().getFirst().getEffect(MobEffects.SPEED);
         if (effect == null || effect.getDuration() >= 300) {
-            throw new AssertionError("Expected the server-side speed duration to advance ten times faster.");
+            throw new AssertionError(
+                    "Expected the server-side speed duration to advance ten times faster.");
         }
     }
 
     private static void assertClientEffectDurationSynchronized(
             ClientGameTestContext context,
-            net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server
-    ) {
-        int serverDuration = server.computeOnServer(current -> {
-            MobEffectInstance effect = current.getPlayerList().getPlayers().getFirst().getEffect(MobEffects.SPEED);
-            if (effect == null) {
-                throw new AssertionError("Expected the server player to retain the speed effect.");
-            }
-            return effect.getDuration();
-        });
-        int clientDuration = context.computeOnClient(client -> {
-            if (client.player == null) {
-                throw new AssertionError("Expected the client player to be available.");
-            }
-            MobEffectInstance effect = client.player.getEffect(MobEffects.SPEED);
-            if (effect == null) {
-                throw new AssertionError("Expected the vanilla client to receive the speed effect.");
-            }
-            return effect.getDuration();
-        });
+            net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server) {
+        int serverDuration =
+                server.computeOnServer(
+                        current -> {
+                            MobEffectInstance effect =
+                                    current.getPlayerList()
+                                            .getPlayers()
+                                            .getFirst()
+                                            .getEffect(MobEffects.SPEED);
+                            if (effect == null) {
+                                throw new AssertionError(
+                                        "Expected the server player to retain the speed effect.");
+                            }
+                            return effect.getDuration();
+                        });
+        int clientDuration =
+                context.computeOnClient(
+                        client -> {
+                            if (client.player == null) {
+                                throw new AssertionError(
+                                        "Expected the client player to be available.");
+                            }
+                            MobEffectInstance effect = client.player.getEffect(MobEffects.SPEED);
+                            if (effect == null) {
+                                throw new AssertionError(
+                                        "Expected the vanilla client to receive the speed effect.");
+                            }
+                            return effect.getDuration();
+                        });
         if (Math.abs(serverDuration - clientDuration) > 20) {
             throw new AssertionError(
                     "Expected accelerated effect duration packets to keep the vanilla client synchronized: server "
-                            + serverDuration + ", client " + clientDuration
-            );
+                            + serverDuration
+                            + ", client "
+                            + clientDuration);
         }
     }
 
@@ -284,10 +313,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext server,
             String label,
             int slot,
-            boolean crossbow
-    ) {
-        // A one-tick bow shot is a crit and can deal 10 (AbstractArrow.java:436,454-455), a cow's whole health
-        // (AbstractCow.java:57). A killed target leaves the level after its death animation, so the check holds the
+            boolean crossbow) {
+        // A one-tick bow shot is a crit and can deal 10 (AbstractArrow.java:436,454-455), a cow's
+        // whole health
+        // (AbstractCow.java:57). A killed target leaves the level after its death animation, so the
+        // check holds the
         // entity instead of looking it up by name afterwards.
         Cow target = server.computeOnServer(current -> prepareShooter(current, label, slot));
         context.waitTicks(10);
@@ -326,21 +356,22 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     private static Cow findTarget(ServerLevel level, String label) {
-        return level.getEntitiesOfClass(
+        return level
+                .getEntitiesOfClass(
                         Cow.class,
-                        new net.minecraft.world.phys.AABB(-10, ARENA_Y - 2, -10, 15, ARENA_Y + 4, 10)
-                ).stream()
-                .filter(target -> target.getCustomName() != null && target.getCustomName().getString().equals(label))
+                        new net.minecraft.world.phys.AABB(
+                                -10, ARENA_Y - 2, -10, 15, ARENA_Y + 4, 10))
+                .stream()
+                .filter(
+                        target ->
+                                target.getCustomName() != null
+                                        && target.getCustomName().getString().equals(label))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("Expected showcase target " + label + "."));
     }
 
     private static void aimAt(ServerPlayer player, Cow target) {
-        player.lookAt(
-                EntityAnchorArgument.Anchor.EYES,
-                target,
-                EntityAnchorArgument.Anchor.EYES
-        );
+        player.lookAt(EntityAnchorArgument.Anchor.EYES, target, EntityAnchorArgument.Anchor.EYES);
     }
 
     private static void assertTargetDamaged(MinecraftServer server, String label) {
@@ -349,7 +380,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void assertDamaged(Cow target, String label) {
         if (!(target.getHealth() < target.getMaxHealth())) {
-            throw new AssertionError("Expected the displayed weapon or effect to damage " + label + ".");
+            throw new AssertionError(
+                    "Expected the displayed weapon or effect to damage " + label + ".");
         }
     }
 

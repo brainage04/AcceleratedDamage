@@ -10,15 +10,23 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(DragonSittingScanningPhase.class)
 public abstract class DragonSittingScanningPhaseMixin {
-    @Shadow
-    private int scanningTime;
+    @Shadow private int scanningTime;
 
-    /** Perched scan {@code scanningTime++}: after 25 the dragon attacks or charges a player it can see; at 100 it takes off. */
+    /**
+     * Perched scan {@code scanningTime++}: after 25 the dragon attacks or charges a player it can
+     * see; at 100 it takes off.
+     */
     @Redirect(
             method = "doServerTick",
-            at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingScanningPhase;scanningTime:I", opcode = Opcodes.PUTFIELD, ordinal = 0)
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/boss/enderdragon/phases/DragonSittingScanningPhase;scanningTime:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$up0(DragonSittingScanningPhase self, int vanillaValue) {
-        scanningTime = VirtualTime.isEnabled() ? scanningTime + VirtualTime.ACCELERATION : vanillaValue;
+        scanningTime =
+                VirtualTime.isEnabled() ? scanningTime + VirtualTime.ACCELERATION : vanillaValue;
     }
 }

@@ -11,24 +11,23 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(Entity.class)
 public abstract class EntityMixin {
-    @Shadow
-    private int remainingFireTicks;
+    @Shadow private int remainingFireTicks;
 
     @Shadow
     public abstract void setRemainingFireTicks(int remainingFireTicks);
 
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/Entity;remainingFireTicks:I",
-                    opcode = Opcodes.GETFIELD,
-                    ordinal = 1
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/Entity;remainingFireTicks:I",
+                            opcode = Opcodes.GETFIELD,
+                            ordinal = 1))
     private int acceleratedDamage$includeCrossedFireDamageTick(Entity entity) {
         if (VirtualTime.isEnabled(entity.level())
-                && EffectTickCadence.crossesScheduledTick(remainingFireTicks, 20, VirtualTime.ACCELERATION)) {
+                && EffectTickCadence.crossesScheduledTick(
+                        remainingFireTicks, 20, VirtualTime.ACCELERATION)) {
             return remainingFireTicks - Math.floorMod(remainingFireTicks, 20);
         }
         return remainingFireTicks;
@@ -36,11 +35,11 @@ public abstract class EntityMixin {
 
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/Entity;setRemainingFireTicks(I)V"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/Entity;setRemainingFireTicks(I)V"))
     private void acceleratedDamage$decrementFireFaster(Entity entity, int vanillaValue) {
         if (VirtualTime.isEnabled(entity.level())) {
             setRemainingFireTicks(Math.max(0, remainingFireTicks - VirtualTime.ACCELERATION));

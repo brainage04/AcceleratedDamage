@@ -24,20 +24,21 @@ public abstract class LivingEntityMixin {
     protected abstract boolean shouldTakeDrowningDamage();
 
     /**
-     * On the compressed timeline {@code invulnerableTime} is measured in virtual ticks as of the end
-     * of the current server tick. A hit simulated at an earlier virtual tick sees the extra virtual
-     * ticks that have not elapsed yet, and records its fresh window relative to the end of the tick.
+     * On the compressed timeline {@code invulnerableTime} is measured in virtual ticks as of the
+     * end of the current server tick. A hit simulated at an earlier virtual tick sees the extra
+     * virtual ticks that have not elapsed yet, and records its fresh window relative to the end of
+     * the tick.
      */
     @Redirect(
             method = "hurtServer",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
-                    opcode = Opcodes.GETFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
+                            opcode = Opcodes.GETFIELD))
     private int acceleratedDamage$readInvulnerability(LivingEntity self) {
-        if (self.level() instanceof ServerLevel level && level.getGameRules().get(ModGameRules.DISABLE_IFRAMES)) {
+        if (self.level() instanceof ServerLevel level
+                && level.getGameRules().get(ModGameRules.DISABLE_IFRAMES)) {
             self.invulnerableTime = Math.min(self.invulnerableTime, 10);
             return self.invulnerableTime;
         }
@@ -48,44 +49,45 @@ public abstract class LivingEntityMixin {
 
     @Redirect(
             method = "hurtServer",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
-                    opcode = Opcodes.PUTFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
+                            opcode = Opcodes.PUTFIELD))
     private void acceleratedDamage$writeInvulnerability(LivingEntity self, int value) {
-        self.invulnerableTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, value - VirtualTime.remainingInTick())
-                : value;
+        self.invulnerableTime =
+                VirtualTime.isEnabled(self.level())
+                        ? Math.max(0, value - VirtualTime.remainingInTick())
+                        : value;
     }
 
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
-                    opcode = Opcodes.PUTFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/LivingEntity;invulnerableTime:I",
+                            opcode = Opcodes.PUTFIELD))
     private void acceleratedDamage$decayInvulnerabilityFaster(LivingEntity self, int vanillaValue) {
-        self.invulnerableTime = VirtualTime.isEnabled(self.level())
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
-                : vanillaValue;
+        self.invulnerableTime =
+                VirtualTime.isEnabled(self.level())
+                        ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                        : vanillaValue;
     }
 
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;decreaseAirSupply(I)I"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/LivingEntity;decreaseAirSupply(I)I"))
     private int acceleratedDamage$drownFaster(LivingEntity self, int supply) {
         if (!(self.level() instanceof ServerLevel level) || !VirtualTime.isEnabled(level)) {
             return decreaseAirSupply(supply);
         }
-        // Replays the vanilla drowning step for all but the last virtual tick, which vanilla runs itself.
+        // Replays the vanilla drowning step for all but the last virtual tick, which vanilla runs
+        // itself.
         for (int offset = 0; offset < VirtualTime.LAST_OFFSET; offset++) {
             supply = decreaseAirSupply(supply);
             self.setAirSupply(supply);
@@ -106,11 +108,11 @@ public abstract class LivingEntityMixin {
 
     @Redirect(
             method = "baseTick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;increaseAirSupply(I)I"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/LivingEntity;increaseAirSupply(I)I"))
     private int acceleratedDamage$refillAirFaster(LivingEntity self, int supply) {
         if (!VirtualTime.isEnabled(self.level())) {
             return increaseAirSupply(supply);
@@ -130,14 +132,14 @@ public abstract class LivingEntityMixin {
 
     @Redirect(
             method = "aiStep",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;setTicksFrozen(I)V"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lnet/minecraft/world/entity/LivingEntity;setTicksFrozen(I)V"))
     private void acceleratedDamage$thawFaster(LivingEntity entity, int vanillaValue) {
         if (VirtualTime.isEnabled(entity.level())) {
-            entity.setTicksFrozen(Math.max(0, entity.getTicksFrozen() - (2 * VirtualTime.ACCELERATION)));
+            entity.setTicksFrozen(
+                    Math.max(0, entity.getTicksFrozen() - (2 * VirtualTime.ACCELERATION)));
             return;
         }
         entity.setTicksFrozen(vanillaValue);

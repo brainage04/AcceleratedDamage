@@ -14,17 +14,17 @@ public abstract class AreaEffectCloudMixin {
     protected abstract void serverTick(ServerLevel level);
 
     /**
-     * Lingering potion and dragon's breath clouds keep all their timing on {@code tickCount}:
-     * wait time, lifetime, radius change per tick, the 5-tick victim scan and the re-application delay.
+     * Lingering potion and dragon's breath clouds keep all their timing on {@code tickCount}: wait
+     * time, lifetime, radius change per tick, the 5-tick victim scan and the re-application delay.
      * The server tick runs once per virtual tick, advancing {@code tickCount} between runs.
      */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lnet/minecraft/world/entity/AreaEffectCloud;serverTick(Lnet/minecraft/server/level/ServerLevel;)V"
-            )
-    )
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target =
+                                    "Lnet/minecraft/world/entity/AreaEffectCloud;serverTick(Lnet/minecraft/server/level/ServerLevel;)V"))
     private void acceleratedDamage$serverTickFaster(AreaEffectCloud self, ServerLevel level) {
         if (!VirtualTime.isEnabled(level)) {
             serverTick(level);

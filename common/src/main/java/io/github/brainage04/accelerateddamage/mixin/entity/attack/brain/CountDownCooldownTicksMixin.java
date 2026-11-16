@@ -16,18 +16,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(CountDownCooldownTicks.class)
 public abstract class CountDownCooldownTicksMixin {
-    @Shadow
-    @Final
-    private MemoryModuleType<Integer> cooldownTicks;
+    @Shadow @Final private MemoryModuleType<Integer> cooldownTicks;
 
     /**
-     * {@code RAM_COOLDOWN_TICKS} (goat ram) and {@code CHARGE_COOLDOWN_TICKS} (nautilus and zombie nautilus dash)
-     * count down one per tick. Vanilla has already stepped once; this adds the other nine virtual ticks, and erases
-     * the memory now when vanilla would have erased it (one tick after reaching zero) within this server tick.
+     * {@code RAM_COOLDOWN_TICKS} (goat ram) and {@code CHARGE_COOLDOWN_TICKS} (nautilus and zombie
+     * nautilus dash) count down one per tick. Vanilla has already stepped once; this adds the other
+     * nine virtual ticks, and erases the memory now when vanilla would have erased it (one tick
+     * after reaching zero) within this server tick.
      */
-    @Inject(method = "tick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/LivingEntity;J)V", at = @At("TAIL"))
-    private void acceleratedDamage$countDownAttackCooldownFaster(ServerLevel level, LivingEntity body, long timestamp, CallbackInfo ci) {
-        if (cooldownTicks != MemoryModuleType.RAM_COOLDOWN_TICKS && cooldownTicks != MemoryModuleType.CHARGE_COOLDOWN_TICKS
+    @Inject(
+            method =
+                    "tick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/LivingEntity;J)V",
+            at = @At("TAIL"))
+    private void acceleratedDamage$countDownAttackCooldownFaster(
+            ServerLevel level, LivingEntity body, long timestamp, CallbackInfo ci) {
+        if (cooldownTicks != MemoryModuleType.RAM_COOLDOWN_TICKS
+                        && cooldownTicks != MemoryModuleType.CHARGE_COOLDOWN_TICKS
                 || !VirtualTime.isEnabled(level)) {
             return;
         }

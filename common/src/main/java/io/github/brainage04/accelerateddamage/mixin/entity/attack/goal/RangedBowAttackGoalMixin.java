@@ -16,21 +16,21 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(RangedBowAttackGoal.class)
 public abstract class RangedBowAttackGoalMixin {
-    @Shadow
-    private int attackTime;
+    @Shadow private int attackTime;
 
     /**
      * Pause between shots {@code attackTime} ({@code --attackTime <= 0}): the read feeding the
-     * decrement is lowered by a further 9, stopping at 1 so the countdown ends on 0 without overshoot.
+     * decrement is lowered by a further 9, stopping at 1 so the countdown ends on 0 without
+     * overshoot.
      */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/goal/RangedBowAttackGoal;attackTime:I",
-                    opcode = Opcodes.GETFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/goal/RangedBowAttackGoal;attackTime:I",
+                            opcode = Opcodes.GETFIELD))
     private int acceleratedDamage$countDownFaster(RangedBowAttackGoal<?> self) {
         return this.attackTime > 0 && VirtualTime.isEnabled()
                 ? Math.max(1, this.attackTime - VirtualTime.LAST_OFFSET)

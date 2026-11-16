@@ -12,33 +12,31 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Bow draw and crossbow charge for every entity, players included. Advancing the use countdown makes
- * {@code getTicksUsingItem()} count virtual ticks, so bow power ({@code BowItem.getPowerForTime}) and
- * crossbow charge ({@code CrossbowItem.getChargeDuration}) come out right for goal and brain users alike.
- * Limited to {@link ProjectileWeaponItem} users: drinking, eating, shields, tridents and kinetic (spear)
- * weapons keep vanilla item-use speed.
+ * Bow draw and crossbow charge for every entity, players included. Advancing the use countdown
+ * makes {@code getTicksUsingItem()} count virtual ticks, so bow power ({@code
+ * BowItem.getPowerForTime}) and crossbow charge ({@code CrossbowItem.getChargeDuration}) come out
+ * right for goal and brain users alike. Limited to {@link ProjectileWeaponItem} users: drinking,
+ * eating, shields, tridents and kinetic (spear) weapons keep vanilla item-use speed.
  */
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityItemUseMixin {
-    @Shadow
-    protected ItemStack useItem;
+    @Shadow protected ItemStack useItem;
 
-    @Shadow
-    protected int useItemRemaining;
+    @Shadow protected int useItemRemaining;
 
     /**
      * Item-use countdown {@code useItemRemaining} ({@code --useItemRemaining == 0}): the read
      * feeding the decrement is lowered by a further 9. From a positive value it stops at 1, so the
-     * countdown still lands on 0 exactly; past 0 (held longer than the use duration) it keeps going.
+     * countdown still lands on 0 exactly; past 0 (held longer than the use duration) it keeps
+     * going.
      */
     @Redirect(
             method = "updateUsingItem",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/LivingEntity;useItemRemaining:I",
-                    opcode = Opcodes.GETFIELD
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target = "Lnet/minecraft/world/entity/LivingEntity;useItemRemaining:I",
+                            opcode = Opcodes.GETFIELD))
     private int acceleratedDamage$drawWeaponFaster(LivingEntity self) {
         if (!(this.useItem.getItem() instanceof ProjectileWeaponItem)
                 || this.useItem.has(DataComponents.KINETIC_WEAPON)
