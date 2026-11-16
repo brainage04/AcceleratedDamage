@@ -152,7 +152,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 context,
                                 "showcase.accelerated-spear",
                                 "A spear stabs on the accelerated cooldown",
-                                "The vanilla client's own attack gate accepts the stab after three ticks");
+                                "The vanilla client's own attack gate accepts the stab on the"
+                                        + " accelerated delay");
                         assertClientSpearGateIsAccelerated(context, server);
                         context.waitTicks(20);
                     } finally {
