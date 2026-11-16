@@ -52,8 +52,4 @@ public final class AttackSpeedSync {
             attackSpeed.removeModifier(MODIFIER_ID);
         }
     }
-
-    public static boolean isApplied(ServerPlayer player) {
-        return player.getAttribute(Attributes.ATTACK_SPEED).getModifier(MODIFIER_ID) != null;
-    }
 }

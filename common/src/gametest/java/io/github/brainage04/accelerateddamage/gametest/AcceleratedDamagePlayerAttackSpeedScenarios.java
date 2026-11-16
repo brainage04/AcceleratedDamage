@@ -12,7 +12,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity.RemovalReason;
-import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeMap;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -170,6 +169,15 @@ public final class AcceleratedDamagePlayerAttackSpeedScenarios {
             // (ServerPlayer.java:1606-1608), so the transient modifier is not carried over.
             respawned = server.getPlayerList().respawn(player, false, RemovalReason.KILLED);
             assertTrue(respawned != null, "Expected the respawn to return a player");
+            // restoreFrom copies base values and permanent modifiers only, so the transient
+            // modifier is gone until the first tick adds it back; the attribute reads the
+            // respawned player's own base value, not the accelerated one.
+            assertTrue(
+                    Float.compare(
+                                    (float) respawned.getAttributeValue(Attributes.ATTACK_SPEED),
+                                    vanillaAttackSpeed * 10.0F)
+                            != 0,
+                    "Expected the transient attack speed not to survive the respawn copy");
             respawned.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.IRON_SWORD));
             respawned.doTick();
             respawned.doTick();
