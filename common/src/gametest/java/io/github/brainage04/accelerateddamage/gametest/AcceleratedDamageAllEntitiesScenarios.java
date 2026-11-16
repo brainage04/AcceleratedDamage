@@ -51,10 +51,8 @@ public final class AcceleratedDamageAllEntitiesScenarios {
             setRule(rules, server, false);
             player = context.makeMockServerPlayerInLevel();
             // The mock player is CREATIVE (GameType.java:62-66, 26.2), which makes it invulnerable,
-            // and its
-            // connection still waits for the client to load (ServerPlayer.java:1279-1280, 26.2),
-            // which makes it
-            // immune to every source until the 60-tick timeout runs out
+            // and its connection still waits for the client to load (ServerPlayer.java:1279-1280,
+            // 26.2), which makes it immune to every source until the 60-tick timeout runs out
             // (ServerGamePacketListenerImpl.java:2214-2216).
             player.getAbilities().invulnerable = false;
             player.setInvulnerable(false);
