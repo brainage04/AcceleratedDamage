@@ -242,8 +242,7 @@ public final class AcceleratedDamagePlayerAttackSpeedScenarios {
                 };
         ClientboundUpdateAttributesPacket packet =
                 new ClientboundUpdateAttributesPacket(
-                        serverPlayer.getId(),
-                        serverPlayer.getAttributes().getSyncableAttributes());
+                        serverPlayer.getId(), serverPlayer.getAttributes().getSyncableAttributes());
         AttributeMap attributes = standIn.getAttributes();
         for (ClientboundUpdateAttributesPacket.AttributeSnapshot snapshot : packet.getValues()) {
             AttributeInstance instance = attributes.getInstance(snapshot.attribute());
