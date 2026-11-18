@@ -1,6 +1,6 @@
 # Development
 
-Use Java 25. The project has common sources and Fabric and NeoForge loader modules. `settings.gradle` uses the sibling MinecraftModConventions checkout when present; otherwise Gradle resolves the version pinned in `gradle.properties`.
+Use Java 25. The project has common sources and Fabric and NeoForge loader modules. Gradle resolves the MinecraftModConventions version pinned in `gradle.properties`; pass `-PuseLocalConventions` to build against the sibling `../MinecraftModConventions` checkout instead.
 
 ## Build and tests
 
