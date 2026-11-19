@@ -666,7 +666,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 current -> {
                     for (int target : targets) {
                         LivingEntity damaged = living(current, target);
-                        if (damaged.getHealth() > 14.0F) {
+                        if (damaged.getHealth() > damaged.getMaxHealth() - 6.0F) {
                             MobEffectInstance poison = damaged.getEffect(MobEffects.POISON);
                             throw new AssertionError(
                                     "Expected accelerated fire and poison to take more than six health in twenty ticks: health "
@@ -718,10 +718,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     removeTarget(current, slow[0]);
                     restoreRules(current);
                 });
-        if (health < 17.0F) {
+        float maxHealth = server.computeOnServer(current -> living(current, slow[0]).getMaxHealth());
+        if (health < maxHealth - 3.0F) {
             throw new AssertionError(
                     "Expected vanilla fire and poison to deal little damage in twenty ticks, health was "
-                            + health);
+                            + health
+                            + " of "
+                            + maxHealth);
         }
         ClientGameTestRecorder.log(context, "rule off: health after twenty ticks " + health);
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
@@ -798,12 +801,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// A mob target for the environmental stages: a mob ticks its own fire and effects, which the
-    /// recorded player's targets exist to be hit by, not to burn.
+    /// recorded player's targets exist to be hit by, not to burn. A villager, not a zombie: zombies are
+    /// in `#minecraft:undead`, which `EntityTypeTags.IGNORES_POISON_AND_REGEN` covers, so
+    /// `LivingEntity#addEffect` refuses poison on them (LivingEntity.java:1033-1040), and a zombie also
+    /// burns in daylight, which would pass the fire stage without the rule.
     private static int spawnMobTarget(MinecraftServer server, String name, double x, double z) {
         ServerLevel level = server.overworld();
         net.minecraft.world.entity.Mob target =
                 (net.minecraft.world.entity.Mob)
-                        EntityTypes.ZOMBIE.create(level, EntitySpawnReason.COMMAND);
+                        EntityTypes.VILLAGER.create(level, EntitySpawnReason.COMMAND);
         if (target == null) {
             throw new AssertionError("Expected to create " + name);
         }
