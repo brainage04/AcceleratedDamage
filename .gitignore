@@ -45,3 +45,6 @@ replay_*.log
 .env
 
 .codex
+
+# gametest run lock
+.gametest.lock
