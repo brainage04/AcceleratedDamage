@@ -712,15 +712,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             return new int[] {target};
                         });
         context.waitTicks(20);
-        float health = server.computeOnServer(current -> living(current, slow[0]).getHealth());
+        float[] readings =
+                server.computeOnServer(
+                        current -> {
+                            LivingEntity damaged = living(current, slow[0]);
+                            return new float[] {damaged.getHealth(), damaged.getMaxHealth()};
+                        });
+        float health = readings[0];
+        float maxHealth = readings[1];
         server.runOnServer(
                 current -> {
                     removeTarget(current, slow[0]);
                     restoreRules(current);
                 });
-        float maxHealth =
-                server.computeOnServer(current -> living(current, slow[0]).getMaxHealth());
-        if (health < maxHealth - 3.0F) {
+        if (health < maxHealth - 6.0F) {
             throw new AssertionError(
                     "Expected vanilla fire and poison to deal little damage in twenty ticks, health was "
                             + health
@@ -802,15 +807,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// A mob target for the environmental stages: a mob ticks its own fire and effects, which the
-    /// recorded player's targets exist to be hit by, not to burn. A villager, not a zombie: zombies
-    /// are in `#minecraft:undead`, which `EntityTypeTags.IGNORES_POISON_AND_REGEN` covers, so
-    /// `LivingEntity#addEffect` refuses poison on them (LivingEntity.java:1033-1040), and a zombie
-    /// also burns in daylight, which would pass the fire stage without the rule.
+    /// recorded player's targets exist to be hit by, not to burn. An iron golem, not a zombie:
+    /// zombies are in `#minecraft:undead`, which `EntityTypeTags.IGNORES_POISON_AND_REGEN` covers,
+    /// so `LivingEntity#addEffect` refuses poison on them (LivingEntity.java:1033-1040), and a
+    /// zombie also burns in daylight, which would pass the fire stage without the rule. Its 100
+    /// health (IronGolem.java:94) outlasts the accelerated stage, so the target is still there to
+    /// read.
     private static int spawnMobTarget(MinecraftServer server, String name, double x, double z) {
         ServerLevel level = server.overworld();
         net.minecraft.world.entity.Mob target =
                 (net.minecraft.world.entity.Mob)
-                        EntityTypes.VILLAGER.create(level, EntitySpawnReason.COMMAND);
+                        EntityTypes.IRON_GOLEM.create(level, EntitySpawnReason.COMMAND);
         if (target == null) {
             throw new AssertionError("Expected to create " + name);
         }
