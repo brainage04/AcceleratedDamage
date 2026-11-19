@@ -10,38 +10,41 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(targets = "net.minecraft.world.entity.monster.Ghast$GhastShootFireballGoal")
 public abstract class GhastShootFireballGoalMixin {
-    @Shadow
-    public int chargeTime;
+    @Shadow public int chargeTime;
 
-    /** Fireball charge {@code chargeTime++}, which fires at exactly 20 and then restarts from -40. */
+    /**
+     * Fireball charge {@code chargeTime++}, which fires at exactly 20 and then restarts from -40.
+     */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/monster/Ghast$GhastShootFireballGoal;chargeTime:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/monster/Ghast$GhastShootFireballGoal;chargeTime:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$chargeFaster(@Coerce Object self, int vanillaValue) {
-        chargeTime = VirtualTime.isEnabled() && chargeTime < 20
-                ? Math.min(20, chargeTime + VirtualTime.ACCELERATION)
-                : vanillaValue;
+        chargeTime =
+                VirtualTime.isEnabled() && chargeTime < 20
+                        ? Math.min(20, chargeTime + VirtualTime.ACCELERATION)
+                        : vanillaValue;
     }
 
     /** Charge decay {@code chargeTime--} while the target is out of sight. */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/monster/Ghast$GhastShootFireballGoal;chargeTime:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 2
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/monster/Ghast$GhastShootFireballGoal;chargeTime:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 2))
     private void acceleratedDamage$decayChargeFaster(@Coerce Object self, int vanillaValue) {
-        chargeTime = VirtualTime.isEnabled()
-                ? Math.max(0, chargeTime - VirtualTime.ACCELERATION)
-                : vanillaValue;
+        chargeTime =
+                VirtualTime.isEnabled()
+                        ? Math.max(0, chargeTime - VirtualTime.ACCELERATION)
+                        : vanillaValue;
     }
 }

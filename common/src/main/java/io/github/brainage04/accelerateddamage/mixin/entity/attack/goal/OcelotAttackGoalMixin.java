@@ -12,26 +12,27 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(OcelotAttackGoal.class)
 public abstract class OcelotAttackGoalMixin {
-    @Shadow
-    @Final
-    private Mob mob;
+    @Shadow @Final private Mob mob;
 
-    @Shadow
-    private int attackTime;
+    @Shadow private int attackTime;
 
-    /** Ocelot/cat melee cooldown {@code attackTime} (20 ticks), stepped by 10 and floored at 0 like vanilla. */
+    /**
+     * Ocelot/cat melee cooldown {@code attackTime} (20 ticks), stepped by 10 and floored at 0 like
+     * vanilla.
+     */
     @Redirect(
             method = "tick",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/world/entity/ai/goal/OcelotAttackGoal;attackTime:I",
-                    opcode = Opcodes.PUTFIELD,
-                    ordinal = 0
-            )
-    )
+            at =
+                    @At(
+                            value = "FIELD",
+                            target =
+                                    "Lnet/minecraft/world/entity/ai/goal/OcelotAttackGoal;attackTime:I",
+                            opcode = Opcodes.PUTFIELD,
+                            ordinal = 0))
     private void acceleratedDamage$coolDownFaster(OcelotAttackGoal self, int vanillaValue) {
-        this.attackTime = VirtualTime.isEnabled(this.mob.level())
-                ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
-                : vanillaValue;
+        this.attackTime =
+                VirtualTime.isEnabled(this.mob.level())
+                        ? Math.max(0, vanillaValue - VirtualTime.LAST_OFFSET)
+                        : vanillaValue;
     }
 }

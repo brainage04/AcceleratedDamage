@@ -13,9 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class PlayerMixin {
     @Inject(method = "getAttackStrengthScale", at = @At("HEAD"), cancellable = true)
     private void acceleratedDamage$fullyChargeAttacks(
-            float partialTick,
-            CallbackInfoReturnable<Float> cir
-    ) {
+            float partialTick, CallbackInfoReturnable<Float> cir) {
         Player self = (Player) (Object) this;
         if (self.level() instanceof ServerLevel level
                 && level.getGameRules().get(ModGameRules.DISABLE_ATTACK_COOLDOWN)) {
@@ -25,10 +23,7 @@ public abstract class PlayerMixin {
 
     @Inject(method = "cannotAttackWithItem", at = @At("HEAD"), cancellable = true)
     private void acceleratedDamage$allowImmediateItemAttacks(
-            ItemStack stack,
-            int ticksSinceLastAttack,
-            CallbackInfoReturnable<Boolean> cir
-    ) {
+            ItemStack stack, int ticksSinceLastAttack, CallbackInfoReturnable<Boolean> cir) {
         Player self = (Player) (Object) this;
         if (self.level() instanceof ServerLevel level
                 && level.getGameRules().get(ModGameRules.DISABLE_ATTACK_COOLDOWN)) {

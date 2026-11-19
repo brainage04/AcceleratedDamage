@@ -29,7 +29,8 @@ public final class AcceleratedDamageGameTest {
 
     @GameTest(environment = "accelerateddamage:attack_cooldown")
     public void attackCooldownIsImmediateForExistingAndJoiningPlayers(GameTestHelper context) {
-        AcceleratedDamageGameTestScenarios.attackCooldownIsImmediateForExistingAndJoiningPlayers(context);
+        AcceleratedDamageGameTestScenarios.attackCooldownIsImmediateForExistingAndJoiningPlayers(
+                context);
     }
 
     @GameTest(environment = "accelerateddamage:instant_shoot", maxTicks = 100)

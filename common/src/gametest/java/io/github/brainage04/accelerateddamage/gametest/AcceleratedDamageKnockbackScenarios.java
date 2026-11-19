@@ -1,6 +1,8 @@
 package io.github.brainage04.accelerateddamage.gametest;
 
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
+import java.util.List;
+import java.util.Optional;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
@@ -30,20 +32,15 @@ import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.gamerules.GameRules;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.List;
-import java.util.Optional;
-
-/// Knockback comes only from a hit that takes the full-damage path of `LivingEntity#hurtServer`. With
-/// `disable_i_frames` every hit takes that path, so every hit knocks its target back; vanilla rejects repeat hits
-/// inside the ten-tick part of the twenty-tick cooldown and knocks back only the first, and 26.3 also skips
-/// knockback for a hit that was fully blocked. Every case below pairs the enabled rule with the same shot sequence
-/// while the rule is off.
+/// Knockback comes only from a hit that takes the full-damage path of `LivingEntity#hurtServer`.
+/// With `disable_i_frames` every hit takes that path, so every hit knocks its target back; vanilla
+/// rejects repeat hits inside the ten-tick part of the twenty-tick cooldown and knocks back only
+/// the first, and 26.3 also skips knockback for a hit that was fully blocked. Every case below
+/// pairs the enabled rule with the same shot sequence while the rule is off.
 public final class AcceleratedDamageKnockbackScenarios {
-    private AcceleratedDamageKnockbackScenarios() {
-    }
+    private AcceleratedDamageKnockbackScenarios() {}
 
     public static void everyHitKnocksBackWhileIFramesAreDisabled(GameTestHelper context) {
         ServerLevel level = context.getLevel();
@@ -59,20 +56,26 @@ public final class AcceleratedDamageKnockbackScenarios {
             assertTrue(strike(level, victim, melee), "Expected the first vanilla hit to apply");
             assertKnockedBack(victim, "Expected the first vanilla hit to knock its target back");
 
-            assertFalse(strike(level, victim, melee), "Expected vanilla invincibility to reject the second hit");
-            assertNotKnockedBack(victim, "Expected vanilla invincibility to skip the second hit's knockback");
+            assertFalse(
+                    strike(level, victim, melee),
+                    "Expected vanilla invincibility to reject the second hit");
+            assertNotKnockedBack(
+                    victim, "Expected vanilla invincibility to skip the second hit's knockback");
 
             victim.discard();
             rules.set(ModGameRules.DISABLE_IFRAMES, true, server);
             Zombie repeated = spawnZombie(context, 4.5, 5.5);
             for (int hit = 1; hit <= 3; hit++) {
-                assertTrue(strike(level, repeated, melee),
+                assertTrue(
+                        strike(level, repeated, melee),
                         "Expected hit " + hit + " to apply with invincibility disabled");
                 assertKnockedBack(repeated, "Expected hit " + hit + " to knock its target back");
                 repeated.setDeltaMovement(Vec3.ZERO);
             }
-            assertTrue(repeated.getHealth() < 18.5F,
-                    "Expected three accepted one-damage hits to stack, health was " + repeated.getHealth());
+            assertTrue(
+                    repeated.getHealth() < 18.5F,
+                    "Expected three accepted one-damage hits to stack, health was "
+                            + repeated.getHealth());
         } finally {
             setRules(rules, server, false, false, false, false);
         }
@@ -100,16 +103,22 @@ public final class AcceleratedDamageKnockbackScenarios {
             DamageSource melee = level.damageSources().mobAttack(attacker);
             float health = victim.getHealth();
             victim.setDeltaMovement(Vec3.ZERO);
-            assertFalse(victim.hurtServer(level, melee, 4.0F),
+            assertFalse(
+                    victim.hurtServer(level, melee, 4.0F),
                     "Expected a fully blocked hit to report that no damage landed");
-            assertEquals(health, victim.getHealth(), "Expected a fully blocked hit to deal no damage");
+            assertEquals(
+                    health, victim.getHealth(), "Expected a fully blocked hit to deal no damage");
             assertNotKnockedBack(victim, "Expected 26.3 to skip knockback for a fully blocked hit");
 
             victim.stopUsingItem();
             assertFalse(victim.isBlocking(), "Expected lowering the shield to end blocking");
             float unblockedHealth = victim.getHealth();
-            assertTrue(strike(level, victim, melee), "Expected the same hit to land once the shield is down");
-            assertTrue(victim.getHealth() < unblockedHealth, "Expected the unblocked hit to damage its target");
+            assertTrue(
+                    strike(level, victim, melee),
+                    "Expected the same hit to land once the shield is down");
+            assertTrue(
+                    victim.getHealth() < unblockedHealth,
+                    "Expected the unblocked hit to damage its target");
             assertKnockedBack(victim, "Expected the unblocked hit to knock its target back");
         } finally {
             setRules(rules, server, false, false, false, false);
@@ -129,23 +138,34 @@ public final class AcceleratedDamageKnockbackScenarios {
             Zombie victim = spawnZombie(context, 4.5, 5.5);
 
             float first = landFireworkRocket(level, shooter, victim);
-            assertTrue(first > 0.0F, "Expected the first crossbow firework rocket to damage its target");
-            assertKnockedBack(victim, "Expected the first crossbow firework rocket to knock its target back");
+            assertTrue(
+                    first > 0.0F,
+                    "Expected the first crossbow firework rocket to damage its target");
+            assertKnockedBack(
+                    victim, "Expected the first crossbow firework rocket to knock its target back");
 
             reset(victim);
             float second = landFireworkRocket(level, shooter, victim);
-            assertTrue(second > 0.0F,
+            assertTrue(
+                    second > 0.0F,
                     "Expected a second firework rocket inside the same cooldown window to deal its damage");
-            assertKnockedBack(victim, "Expected the second crossbow firework rocket to knock its target back too");
+            assertKnockedBack(
+                    victim,
+                    "Expected the second crossbow firework rocket to knock its target back too");
 
             rules.set(ModGameRules.DISABLE_IFRAMES, false, server);
             reset(victim);
-            assertTrue(landFireworkRocket(level, shooter, victim) > 0.0F,
+            assertTrue(
+                    landFireworkRocket(level, shooter, victim) > 0.0F,
                     "Expected the first vanilla firework rocket to damage its target");
             resetDelta(victim);
-            assertEquals(0.0F, landFireworkRocket(level, shooter, victim),
+            assertEquals(
+                    0.0F,
+                    landFireworkRocket(level, shooter, victim),
                     "Expected vanilla invincibility to discard a second firework rocket in the same window");
-            assertNotKnockedBack(victim, "Expected vanilla invincibility to skip the discarded rocket's knockback");
+            assertNotKnockedBack(
+                    victim,
+                    "Expected vanilla invincibility to skip the discarded rocket's knockback");
         } finally {
             setRules(rules, server, false, false, false, false);
             removePlayer(server, shooter);
@@ -163,17 +183,25 @@ public final class AcceleratedDamageKnockbackScenarios {
         try {
             setRules(rules, server, true, false, false, false);
             Zombie victim = spawnZombie(context, 4.5, 5.5);
-            assertEquals(3, fireMultishot(level, shooter, victim),
+            assertEquals(
+                    3,
+                    fireMultishot(level, shooter, victim),
                     "Expected a multishot crossbow to launch three projectiles");
-            assertEquals(3, landEveryProjectile(level, victim),
+            assertEquals(
+                    3,
+                    landEveryProjectile(level, victim),
                     "Expected every multishot projectile to land while invincibility is disabled");
 
             rules.set(ModGameRules.DISABLE_IFRAMES, false, server);
             victim.discard();
             victim = spawnZombie(context, 4.5, 5.5);
-            assertEquals(3, fireMultishot(level, shooter, victim),
+            assertEquals(
+                    3,
+                    fireMultishot(level, shooter, victim),
                     "Expected a multishot crossbow to launch three projectiles with the rule off");
-            assertEquals(1, landEveryProjectile(level, victim),
+            assertEquals(
+                    1,
+                    landEveryProjectile(level, victim),
                     "Expected vanilla invincibility to keep only the first multishot projectile");
         } finally {
             setRules(rules, server, false, false, false, false);
@@ -194,18 +222,24 @@ public final class AcceleratedDamageKnockbackScenarios {
             for (int charge = 1; charge <= 3; charge++) {
                 float before = victim.getHealth();
                 burstWindCharge(level, victim);
-                assertTrue(victim.getHealth() < before, "Expected wind charge " + charge + " to damage its target");
+                assertTrue(
+                        victim.getHealth() < before,
+                        "Expected wind charge " + charge + " to damage its target");
             }
 
             rules.set(ModGameRules.DISABLE_IFRAMES, false, server);
             reset(victim);
             float before = victim.getHealth();
             burstWindCharge(level, victim);
-            assertTrue(victim.getHealth() < before, "Expected the first vanilla wind charge to damage its target");
+            assertTrue(
+                    victim.getHealth() < before,
+                    "Expected the first vanilla wind charge to damage its target");
             for (int charge = 2; charge <= 3; charge++) {
                 float health = victim.getHealth();
                 burstWindCharge(level, victim);
-                assertEquals(health, victim.getHealth(),
+                assertEquals(
+                        health,
+                        victim.getHealth(),
                         "Expected vanilla invincibility to discard wind charge " + charge);
             }
         } finally {
@@ -226,19 +260,25 @@ public final class AcceleratedDamageKnockbackScenarios {
             for (int snowball = 1; snowball <= 3; snowball++) {
                 resetDelta(victim);
                 landSnowball(level, victim);
-                assertEquals(victim.getMaxHealth(), victim.getHealth(),
+                assertEquals(
+                        victim.getMaxHealth(),
+                        victim.getHealth(),
                         "Expected snowball " + snowball + " to deal no damage");
-                assertKnockedBack(victim, "Expected snowball " + snowball + " to knock its target back");
+                assertKnockedBack(
+                        victim, "Expected snowball " + snowball + " to knock its target back");
             }
 
             rules.set(ModGameRules.DISABLE_IFRAMES, false, server);
             reset(victim);
             landSnowball(level, victim);
-            assertKnockedBack(victim, "Expected the first vanilla snowball to knock its target back");
+            assertKnockedBack(
+                    victim, "Expected the first vanilla snowball to knock its target back");
 
             resetDelta(victim);
             landSnowball(level, victim);
-            assertNotKnockedBack(victim, "Expected vanilla invincibility to skip the second snowball's knockback");
+            assertNotKnockedBack(
+                    victim,
+                    "Expected vanilla invincibility to skip the second snowball's knockback");
         } finally {
             setRules(rules, server, false, false, false, false);
         }
@@ -266,11 +306,11 @@ public final class AcceleratedDamageKnockbackScenarios {
                 BlocksAttacks.ItemDamageFunction.DEFAULT,
                 Optional.empty(),
                 Optional.empty(),
-                Optional.empty()
-        );
+                Optional.empty());
     }
 
-    private static float landFireworkRocket(ServerLevel level, ServerPlayer shooter, LivingEntity victim) {
+    private static float landFireworkRocket(
+            ServerLevel level, ServerPlayer shooter, LivingEntity victim) {
         shooter.snapTo(victim.getX(), victim.getY(), victim.getZ() - 2.5);
         aimAt(shooter, victim);
 
@@ -279,24 +319,25 @@ public final class AcceleratedDamageKnockbackScenarios {
         ItemStack crossbow = new ItemStack(Items.CROSSBOW);
         crossbow.set(
                 DataComponents.CHARGED_PROJECTILES,
-                ChargedProjectiles.of(ItemStackTemplate.fromNonEmptyStack(rocket))
-        );
+                ChargedProjectiles.of(ItemStackTemplate.fromNonEmptyStack(rocket)));
         shooter.setItemInHand(InteractionHand.MAIN_HAND, crossbow);
 
         float before = victim.getHealth();
         victim.setDeltaMovement(Vec3.ZERO);
         crossbow.use(level, shooter, InteractionHand.MAIN_HAND);
 
-        List<FireworkRocketEntity> launched = level.getEntitiesOfClass(
-                FireworkRocketEntity.class,
-                victim.getBoundingBox().inflate(16.0)
-        );
+        List<FireworkRocketEntity> launched =
+                level.getEntitiesOfClass(
+                        FireworkRocketEntity.class, victim.getBoundingBox().inflate(16.0));
         assertEquals(1, launched.size(), "Expected the crossbow to launch one firework rocket");
         FireworkRocketEntity firework = launched.getFirst();
         for (int tick = 0; tick < 10 && !firework.isRemoved(); tick++) {
             firework.setDeltaMovement(
-                    victim.getBoundingBox().getCenter().subtract(firework.position()).normalize().scale(3.0)
-            );
+                    victim.getBoundingBox()
+                            .getCenter()
+                            .subtract(firework.position())
+                            .normalize()
+                            .scale(3.0));
             firework.tick();
         }
         assertTrue(firework.isRemoved(), "Expected the firework rocket to explode on its target");
@@ -304,42 +345,43 @@ public final class AcceleratedDamageKnockbackScenarios {
     }
 
     private static int fireMultishot(ServerLevel level, ServerPlayer shooter, LivingEntity victim) {
-        for (AbstractArrow arrow : level.getEntitiesOfClass(
-                AbstractArrow.class,
-                victim.getBoundingBox().inflate(16.0)
-        )) {
+        for (AbstractArrow arrow :
+                level.getEntitiesOfClass(
+                        AbstractArrow.class, victim.getBoundingBox().inflate(16.0))) {
             arrow.discard();
         }
 
-        Holder<Enchantment> multishot = level.holderLookup(Registries.ENCHANTMENT)
-                .get(Enchantments.MULTISHOT)
-                .orElseThrow(() -> new AssertionError("Expected the multishot enchantment"));
+        Holder<Enchantment> multishot =
+                level.holderLookup(Registries.ENCHANTMENT)
+                        .get(Enchantments.MULTISHOT)
+                        .orElseThrow(
+                                () -> new AssertionError("Expected the multishot enchantment"));
         ItemStack crossbow = new ItemStack(Items.CROSSBOW);
         crossbow.enchant(multishot, 1);
         crossbow.set(
                 DataComponents.CHARGED_PROJECTILES,
-                ChargedProjectiles.ofNonEmpty(List.of(
-                        new ItemStack(Items.ARROW),
-                        new ItemStack(Items.ARROW),
-                        new ItemStack(Items.ARROW)
-                ))
-        );
+                ChargedProjectiles.ofNonEmpty(
+                        List.of(
+                                new ItemStack(Items.ARROW),
+                                new ItemStack(Items.ARROW),
+                                new ItemStack(Items.ARROW))));
         shooter.snapTo(victim.getX(), victim.getY(), victim.getZ() - 2.5);
         aimAt(shooter, victim);
         shooter.setItemInHand(InteractionHand.MAIN_HAND, crossbow);
         crossbow.use(level, shooter, InteractionHand.MAIN_HAND);
 
-        return level.getEntitiesOfClass(AbstractArrow.class, victim.getBoundingBox().inflate(16.0)).size();
+        return level.getEntitiesOfClass(AbstractArrow.class, victim.getBoundingBox().inflate(16.0))
+                .size();
     }
 
-    /// Ticks every projectile into the victim in turn and reports how many of them took the full-damage path, which a
-    /// hit shows by knocking its target back. A projectile the cooldown rejects can still pass on the damage that
-    /// exceeds the window's largest hit, so the health alone does not tell a landed hit from a rejected one.
+    /// Ticks every projectile into the victim in turn and reports how many of them took the
+    /// full-damage path, which a hit shows by knocking its target back. A projectile the cooldown
+    /// rejects can still pass on the damage that exceeds the window's largest hit, so the health
+    /// alone does not tell a landed hit from a rejected one.
     private static int landEveryProjectile(ServerLevel level, LivingEntity victim) {
-        List<AbstractArrow> projectiles = level.getEntitiesOfClass(
-                AbstractArrow.class,
-                victim.getBoundingBox().inflate(16.0)
-        );
+        List<AbstractArrow> projectiles =
+                level.getEntitiesOfClass(
+                        AbstractArrow.class, victim.getBoundingBox().inflate(16.0));
         int landed = 0;
         for (AbstractArrow projectile : projectiles) {
             if (projectile.isRemoved()) {
@@ -350,14 +392,18 @@ public final class AcceleratedDamageKnockbackScenarios {
             double peak = 0.0D;
             for (int tick = 0; tick < 10 && !projectile.isRemoved(); tick++) {
                 projectile.setDeltaMovement(
-                        victim.getBoundingBox().getCenter().subtract(projectile.position()).normalize().scale(3.0)
-                );
+                        victim.getBoundingBox()
+                                .getCenter()
+                                .subtract(projectile.position())
+                                .normalize()
+                                .scale(3.0));
                 projectile.tick();
                 peak = Math.max(peak, victim.getDeltaMovement().horizontalDistanceSqr());
             }
             if (peak >= 0.09D) {
                 landed++;
-                assertTrue(victim.getHealth() < before,
+                assertTrue(
+                        victim.getHealth() < before,
                         "Expected a knocked-back multishot projectile to damage its target too");
             }
             projectile.discard();
@@ -378,7 +424,13 @@ public final class AcceleratedDamageKnockbackScenarios {
     }
 
     private static void landSnowball(ServerLevel level, LivingEntity victim) {
-        Snowball snowball = new Snowball(level, victim.getX(), victim.getY() + 1.0, victim.getZ() - 1.5, new ItemStack(Items.SNOWBALL));
+        Snowball snowball =
+                new Snowball(
+                        level,
+                        victim.getX(),
+                        victim.getY() + 1.0,
+                        victim.getZ() - 1.5,
+                        new ItemStack(Items.SNOWBALL));
         level.addFreshEntity(snowball);
         for (int tick = 0; tick < 10 && !snowball.isRemoved(); tick++) {
             snowball.setDeltaMovement(0.0, 0.0, 1.5);
@@ -414,18 +466,14 @@ public final class AcceleratedDamageKnockbackScenarios {
     private static void assertKnockedBack(LivingEntity victim, String message) {
         if (victim.getDeltaMovement().horizontalDistanceSqr() < 0.09) {
             throw new GameTestAssertException(
-                    Component.literal(message + ": knockback was " + victim.getDeltaMovement()),
-                    0
-            );
+                    Component.literal(message + ": knockback was " + victim.getDeltaMovement()), 0);
         }
     }
 
     private static void assertNotKnockedBack(LivingEntity victim, String message) {
         if (victim.getDeltaMovement().horizontalDistanceSqr() > 1.0E-6) {
             throw new GameTestAssertException(
-                    Component.literal(message + ": knockback was " + victim.getDeltaMovement()),
-                    0
-            );
+                    Component.literal(message + ": knockback was " + victim.getDeltaMovement()), 0);
         }
     }
 
@@ -441,8 +489,7 @@ public final class AcceleratedDamageKnockbackScenarios {
             boolean disableIFrames,
             boolean fasterEffects,
             boolean disableAttackCooldown,
-            boolean instantShoot
-    ) {
+            boolean instantShoot) {
         rules.set(ModGameRules.DISABLE_IFRAMES, disableIFrames, server);
         rules.set(ModGameRules.FASTER_EFFECT_TICKING, fasterEffects, server);
         rules.set(ModGameRules.DISABLE_ATTACK_COOLDOWN, disableAttackCooldown, server);
@@ -462,18 +509,14 @@ public final class AcceleratedDamageKnockbackScenarios {
     private static void assertEquals(int expected, int actual, String message) {
         if (expected != actual) {
             throw new GameTestAssertException(
-                    Component.literal(message + ": expected " + expected + ", found " + actual),
-                    0
-            );
+                    Component.literal(message + ": expected " + expected + ", found " + actual), 0);
         }
     }
 
     private static void assertEquals(float expected, float actual, String message) {
         if (Float.compare(expected, actual) != 0) {
             throw new GameTestAssertException(
-                    Component.literal(message + ": expected " + expected + ", found " + actual),
-                    0
-            );
+                    Component.literal(message + ": expected " + expected + ", found " + actual), 0);
         }
     }
 }
