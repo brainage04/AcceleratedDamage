@@ -24,7 +24,7 @@ public abstract class PrepareRamNearestTargetMixin {
                     opcode = Opcodes.GETFIELD
             )
     )
-    private int acceleratedDamage$shortenRamWindUp(PrepareRamNearestTarget self) {
+    private int acceleratedDamage$shortenRamWindUp(PrepareRamNearestTarget<?> self) {
         return VirtualTime.isEnabled()
                 ? (ramPrepareTime + VirtualTime.ACCELERATION / 2) / VirtualTime.ACCELERATION
                 : ramPrepareTime;

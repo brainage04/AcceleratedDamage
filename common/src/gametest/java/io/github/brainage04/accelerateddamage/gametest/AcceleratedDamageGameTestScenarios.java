@@ -334,7 +334,7 @@ public final class AcceleratedDamageGameTestScenarios {
 
         try {
             setRules(rules, server, false, false, false, false);
-            existingPlayer = context.makeMockServerPlayerInLevel();
+            existingPlayer = TestPlayers.join(context);
             existingPlayer.resetAttackStrengthTicker();
             assertTrue(existingPlayer.getAttackStrengthScale(0.0F) < 1.0F,
                     "Expected vanilla attack charge immediately after attacking");
@@ -350,7 +350,7 @@ public final class AcceleratedDamageGameTestScenarios {
             assertFalse(existingPlayer.cannotAttackWithItem(gatedWeapon, 0),
                     "Expected the rule to bypass minimum-charge enforcement");
 
-            joiningPlayer = context.makeMockServerPlayerInLevel();
+            joiningPlayer = TestPlayers.join(context);
             joiningPlayer.resetAttackStrengthTicker();
             assertEquals(1.0F, joiningPlayer.getAttackStrengthScale(0.0F),
                     "Expected a player joining while enabled to be fully charged immediately");
@@ -375,7 +375,7 @@ public final class AcceleratedDamageGameTestScenarios {
         ServerLevel level = context.getLevel();
         MinecraftServer server = level.getServer();
         GameRules rules = level.getGameRules();
-        ServerPlayer player = context.makeMockServerPlayerInLevel();
+        ServerPlayer player = TestPlayers.join(context);
         IronGolem[] target = {null};
 
         setRules(rules, server, false, false, false, false);
