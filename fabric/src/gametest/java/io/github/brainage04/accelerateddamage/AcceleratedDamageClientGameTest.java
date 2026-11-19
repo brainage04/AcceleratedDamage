@@ -718,7 +718,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     removeTarget(current, slow[0]);
                     restoreRules(current);
                 });
-        float maxHealth = server.computeOnServer(current -> living(current, slow[0]).getMaxHealth());
+        float maxHealth =
+                server.computeOnServer(current -> living(current, slow[0]).getMaxHealth());
         if (health < maxHealth - 3.0F) {
             throw new AssertionError(
                     "Expected vanilla fire and poison to deal little damage in twenty ticks, health was "
