@@ -139,6 +139,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tenth of that fills it.
     private static final int COOLDOWN_TICKS = 4;
 
+    /// Ticks a cooldown stage holds its picture, so the indicator's refill is on screen long
+    /// enough to read.
+    private static final int COOLDOWN_HOLD_TICKS = 40;
+
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on
     /// a tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
@@ -863,24 +867,35 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
         ClientGameTestPlayerActions.attackEntity(context, targetId);
         // The client resets its own attack-strength ticker on the attack packet, so the first
-        // frame after it shows the indicator empty and the following ones fill it.
-        context.waitTicks(COOLDOWN_TICKS);
-        float charge =
-                context.computeOnClient(
-                        client -> client.player == null ? -1.0F : client.player.getAttackStrengthScale(0.0F));
-        float delay =
-                context.computeOnClient(
-                        client ->
-                                client.player == null
-                                        ? -1.0F
-                                        : client.player.getCurrentItemAttackStrengthDelay());
-        System.out.println(
-                "AD_COOLDOWN "
-                        + stage
-                        + " charge="
-                        + charge
-                        + " delay="
-                        + delay);
+        // frame after it shows the indicator empty and the following ones fill it. The stage holds
+        // the refill for the whole half, so the indicator is on screen long enough to read.
+        float charge = -1.0F;
+        float delay = -1.0F;
+        for (int tick = 1; tick <= COOLDOWN_HOLD_TICKS; tick++) {
+            context.waitTick();
+            float[] reading =
+                    context.computeOnClient(
+                            client ->
+                                    client.player == null
+                                            ? new float[] {-1.0F, -1.0F}
+                                            : new float[] {
+                                                client.player.getAttackStrengthScale(0.0F),
+                                                client.player.getCurrentItemAttackStrengthDelay()
+                                            });
+            if (tick == COOLDOWN_TICKS) {
+                charge = reading[0];
+                delay = reading[1];
+            }
+            System.out.println(
+                    "AD_COOLDOWN "
+                            + stage
+                            + " tick="
+                            + tick
+                            + " charge="
+                            + reading[0]
+                            + " delay="
+                            + reading[1]);
+        }
         // A wooden sword's vanilla delay is 20 / 1.6 = 12.5 ticks, so four ticks leave the
         // indicator about a third full; the synced attack speed makes it a tenth, 1.25 ticks, so
         // the same four ticks fill it.
