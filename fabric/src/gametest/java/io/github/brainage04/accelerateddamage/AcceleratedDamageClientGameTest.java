@@ -6,14 +6,12 @@ import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestCommands;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestPlayerActions;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestRecorder;
-import io.github.brainage04.minecraftmodconventions.ClientGameTestRecordingHud;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1384,21 +1382,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + " 0 ticks: "
                             + String.join(" | ", starting)
                             + startingAir);
-            String[] pushed = starting;
-            int[] staleSince = new int[count];
-            Arrays.fill(staleSince, -1);
+            int pushedTick = serverTick;
             for (int tick = 1; tick <= 3 * READING_TICKS; tick++) {
                 context.waitTick();
                 String[] label =
                         server.computeOnServer(current -> caption(current, shown, scene, rulesOn));
                 int now = serverTick;
-                requireCaptionFollowsHealth(stage, scene, now, staleSince, pushed, label);
-                // The caption carries the health numbers, so it is pushed on every tick: a number
-                // that changes on a tick is on screen on the next frame.
-                context.runOnClient(
-                        _ -> ClientGameTestRecordingHud.showStep(stage, label[0], label[1]));
-                pushed = label;
+                requireCaptionIsFresh(stage, now, pushedTick);
                 if (tick % READING_TICKS == 0) {
+                    ClientGameTestRecorder.showStep(context, stage, label[0], label[1]);
+                    pushedTick = now;
                     String airLabel =
                             server.computeOnServer(current -> airLine(current, shown, scene));
                     System.out.println(
@@ -1754,60 +1747,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Fails when a health number the client shows has disagreed with the server's for longer than
-    /// {@link #CAPTION_LAG_TICKS}: the caption must carry the health the server has now, not the
-    /// health it had when the caption was last pushed. {@code staleSince} holds, per target, the
-    /// tick its shown number first disagreed with the server's, or -1 while they agree.
-    private static void requireCaptionFollowsHealth(
-            String stage,
-            EffectScene scene,
-            int now,
-            int[] staleSince,
-            String[] pushed,
-            String[] current) {
-        for (int index = 0; index < staleSince.length; index++) {
-            String name = scene.names().get(index);
-            String shown = numberAfter(pushed, name);
-            String actual = numberAfter(current, name);
-            if (shown.equals(actual)) {
-                staleSince[index] = -1;
-                continue;
-            }
-            if (staleSince[index] < 0) {
-                staleSince[index] = now;
-            }
-            if (now - staleSince[index] >= CAPTION_LAG_TICKS) {
-                throw new AssertionError(
-                        "Expected the caption of "
-                                + stage
-                                + " to show "
-                                + name
-                                + "'s health "
-                                + actual
-                                + " within "
-                                + CAPTION_LAG_TICKS
-                                + " ticks of it changing, the caption has shown "
-                                + shown
-                                + " for "
-                                + (now - staleSince[index])
-                                + " ticks");
-            }
+    /// Fails when the caption the client shows is older than {@link #CAPTION_LAG_TICKS}. The
+    /// caption carries every target's health, so its age is how far the numbers on screen can lag
+    /// the server's.
+    private static void requireCaptionIsFresh(String stage, int now, int pushedTick) {
+        if (now - pushedTick > CAPTION_LAG_TICKS) {
+            throw new AssertionError(
+                    "Expected the caption of "
+                            + stage
+                            + " to be at most "
+                            + CAPTION_LAG_TICKS
+                            + " ticks old, it was pushed "
+                            + (now - pushedTick)
+                            + " ticks ago");
         }
-    }
-
-    /// The number a caption line prints after {@code name}, or the whole line when the name is not
-    /// on it.
-    private static String numberAfter(String[] caption, String name) {
-        for (String line : caption) {
-            int at = line.indexOf(name + " ");
-            if (at >= 0) {
-                int end = line.indexOf(' ', at + name.length() + 1);
-                return end < 0
-                        ? line.substring(at + name.length() + 1)
-                        : line.substring(at + name.length() + 1, end);
-            }
-        }
-        return String.join(" | ", caption);
     }
 
     /// One no-AI mob, for a fish out of water.
