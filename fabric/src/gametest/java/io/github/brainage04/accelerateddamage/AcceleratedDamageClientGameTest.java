@@ -143,6 +143,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// enough to read.
     private static final int COOLDOWN_HOLD_TICKS = 40;
 
+    /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
+    /// indicator fills between hits with the rule on, and far shorter than the vanilla one.
+    private static final int COOLDOWN_CADENCE_TICKS = 6;
+
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on
     /// a tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
@@ -870,13 +874,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
         // The client's own hand must hold the mace before the attack key sends anything.
         context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
-        ClientGameTestPlayerActions.attackEntity(context, targetId);
-        // The client resets its own attack-strength ticker on the attack packet, so the first
-        // frame after it shows the indicator empty and the following ones fill it. The stage holds
-        // the refill for the whole half, so the indicator is on screen long enough to read.
+        // A hit every six ticks: the client resets its own attack-strength ticker on the attack
+        // packet, so the indicator empties and refills between hits. With the effect rule off the
+        // mace's 33.3-tick delay leaves it crawling; with the rule on the synced 3.3-tick delay
+        // fills it before the next hit.
         float charge = -1.0F;
         float delay = -1.0F;
         for (int tick = 1; tick <= COOLDOWN_HOLD_TICKS; tick++) {
+            if ((tick - 1) % COOLDOWN_CADENCE_TICKS == 0) {
+                ClientGameTestPlayerActions.attackEntity(context, targetId);
+            }
             context.waitTick();
             float[] reading =
                     context.computeOnClient(
@@ -887,7 +894,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                                 client.player.getAttackStrengthScale(0.0F),
                                                 client.player.getCurrentItemAttackStrengthDelay()
                                             });
-            if (tick == COOLDOWN_TICKS) {
+            if ((tick - 1) % COOLDOWN_CADENCE_TICKS == COOLDOWN_TICKS) {
                 charge = reading[0];
                 delay = reading[1];
             }
@@ -913,9 +920,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + " and its delay "
                             + delay);
         }
-        if (!rulesOn && charge >= 1.0F) {
+        if (!rulesOn && charge >= 0.5F) {
             throw new AssertionError(
-                    "Expected the client's attack indicator to still be filling "
+                    "Expected the client's attack indicator to be under half full "
                             + COOLDOWN_TICKS
                             + " ticks after a hit with the effect rule off, its charge is "
                             + charge
