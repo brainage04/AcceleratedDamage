@@ -134,6 +134,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static final int READING_TICKS = 14;
 
+    /// Ticks between the sword hit of a cooldown stage and the reading of the client's charge: a
+    /// wooden sword's vanilla delay is 12.5 ticks, so the indicator is about a third full, and a
+    /// tenth of that fills it.
+    private static final int COOLDOWN_TICKS = 4;
+
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on
     /// a tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
@@ -824,7 +829,74 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         enterScene(context, server, playerId, MELEE_STAND, neck);
         meleeHalf(context, server, playerId, targetId, false);
         meleeHalf(context, server, playerId, targetId, true);
+        cooldownHalf(context, server, playerId, targetId, false);
+        cooldownHalf(context, server, playerId, targetId, true);
         server.runOnServer(current -> parkTarget(current, targetId));
+    }
+
+    /// One sword hit, then the crosshair's attack indicator refilling: the client's own charge
+    /// scale, which the synced attack speed shortens tenfold. The cooldown rule is off in both
+    /// halves, because with it on the client is always fully charged and the indicator never draws
+    /// (Hud.java:448-465 in the 26.3 sources).
+    private static void cooldownHalf(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int playerId,
+            int targetId,
+            boolean rulesOn) {
+        String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
+        String title = "Attack indicator, effect rule " + (rulesOn ? "on" : "off");
+        openStage(context, stage, title, "one sword hit, then the indicator refills");
+        server.runOnServer(
+                current -> {
+                    setDamageRules(current, false, false);
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, rulesOn, current);
+                    resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                });
+        ClientGameTestPlayerActions.attackEntity(context, targetId);
+        // The client resets its own attack-strength ticker on the attack packet, so the first
+        // frame after it shows the indicator empty and the following ones fill it.
+        context.waitTicks(COOLDOWN_TICKS);
+        float charge =
+                context.computeOnClient(
+                        client -> client.player == null ? -1.0F : client.player.getAttackStrengthScale(0.0F));
+        float delay =
+                context.computeOnClient(
+                        client ->
+                                client.player == null
+                                        ? -1.0F
+                                        : client.player.getCurrentItemAttackStrengthDelay());
+        System.out.println(
+                "AD_COOLDOWN "
+                        + stage
+                        + " charge="
+                        + charge
+                        + " delay="
+                        + delay);
+        // A wooden sword's vanilla delay is 20 / 1.6 = 12.5 ticks, so four ticks leave the
+        // indicator about a third full; the synced attack speed makes it a tenth, 1.25 ticks, so
+        // the same four ticks fill it.
+        if (rulesOn && charge < 1.0F) {
+            throw new AssertionError(
+                    "Expected the client's attack indicator to be full "
+                            + COOLDOWN_TICKS
+                            + " ticks after a hit with the effect rule on, its charge is "
+                            + charge
+                            + " and its delay "
+                            + delay);
+        }
+        if (!rulesOn && charge >= 1.0F) {
+            throw new AssertionError(
+                    "Expected the client's attack indicator to still be filling "
+                            + COOLDOWN_TICKS
+                            + " ticks after a hit with the effect rule off, its charge is "
+                            + charge
+                            + " and its delay "
+                            + delay);
+        }
+        closeStage(context, stage, 4);
     }
 
     /// Sixteen sword hits, one every two ticks, with the real attack key on a target pinned in
