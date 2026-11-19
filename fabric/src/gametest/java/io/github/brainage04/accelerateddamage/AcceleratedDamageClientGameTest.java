@@ -860,7 +860,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             boolean rulesOn) {
         String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
         String title = "Attack indicator, effect rule " + (rulesOn ? "on" : "off");
-        openStage(context, stage, title, "one mace hit, then the indicator refills");
+        openStage(context, stage, title, "a mace hit every 6 ticks, the indicator refills");
         server.runOnServer(
                 current -> {
                     setDamageRules(current, false, false);
