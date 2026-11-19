@@ -41,10 +41,9 @@ import net.minecraft.world.phys.Vec3;
 /// The showcase the owner asked for: the melee and ranged stages hit player-shaped targets and the
 /// environmental stage burns and poisons a mob, with the target's health printed in the caption
 /// panel after each hit, so a hit landing is visible twice. Each positive stage is followed by the
-/// same actions with the rule off, where the repeat hits do nothing; the environmental stage's
-/// rule-off comparison is asserted after the recording ends rather than recorded. All player
-/// actions go through `ClientGameTestPlayerActions`, so the player only ever turns to a target,
-/// walks into vanilla reach and presses the real attack or use key on the crosshair target.
+/// same actions with the rule off, where the repeat hits do nothing. All player actions go through
+/// `ClientGameTestPlayerActions`, so the player only ever turns to a target, walks into vanilla
+/// reach and presses the real attack or use key on the crosshair target.
 @SuppressWarnings("UnstableApiUsage")
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
     private static final int ARENA_Y = 64;
@@ -237,9 +236,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (chase || hit == 1) {
                 Vec3 position =
                         server.computeOnServer(current -> entity(current, targetId).position());
-                // A sword has no minimum attack range (ToolMaterial.applySwordProperties sets
-                // none), so
-                // the player stands 2.6 blocks out, inside the 3.0-block entity interaction range
+                // A sword sets no minimum attack range (ToolMaterial.applySwordProperties), so the
+                // player stands 2.6 blocks out, inside the 3.0-block entity interaction range
                 // (Attributes.ENTITY_INTERACTION_RANGE).
                 ClientGameTestPlayerActions.walkTo(context, position, MELEE_DISTANCE);
             }
@@ -695,9 +693,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return label.toString();
     }
 
-    /// The accelerated server ticks an effect ten times faster than the client's own countdown, so
-    /// `EffectSyncTicker` resends the duration every ten server ticks; without it the client's copy
-    /// would run out while the server's still has time left.
+    /// The client's copy of an effect must not drift from the server's. In this test the client
+    /// runs the mod too, so its own countdown is accelerated as well and this only catches a resend
+    /// that arrives late or not at all. `EffectSyncTickerTest` covers the resend cadence itself.
     private static void assertClientEffectDurationSynchronized(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         server.runOnServer(

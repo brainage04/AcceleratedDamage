@@ -14,9 +14,16 @@ public final class EffectSyncTicker {
         platform.registerEndServerTick(EffectSyncTicker::syncEffects);
     }
 
+    /// The client counts an effect down once per tick, so a resend every ten server ticks keeps its
+    /// copy within one accelerated window of the server's.
+    static boolean shouldSync(int tickCount, boolean fasterEffectTicking) {
+        return tickCount % 10 == 0 && fasterEffectTicking;
+    }
+
     private static void syncEffects(MinecraftServer server) {
-        if (server.getTickCount() % 10 != 0
-                || !server.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING)) {
+        if (!shouldSync(
+                server.getTickCount(),
+                server.getGameRules().get(ModGameRules.FASTER_EFFECT_TICKING))) {
             return;
         }
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
