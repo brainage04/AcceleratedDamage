@@ -139,16 +139,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tenth of that fills it.
     private static final int COOLDOWN_TICKS = 4;
 
-    /// Ticks a cooldown stage holds its picture, so the indicator's refill is on screen long
-    /// enough to read.
+    /// Ticks a cooldown stage holds its picture, so the indicator's refill is on screen long enough
+    /// to read.
     private static final int COOLDOWN_HOLD_TICKS = 40;
 
     /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
     /// indicator fills between hits with the rule on, and far shorter than the vanilla one.
     private static final int COOLDOWN_CADENCE_TICKS = 6;
 
-    /// How many ticks the caption's health numbers may lag the server's: a number that changes on
-    /// a tick must be on the client's HUD within this many ticks.
+    /// How many ticks the caption's health numbers may lag the server's: a number that changes on a
+    /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
