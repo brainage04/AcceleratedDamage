@@ -1,7 +1,9 @@
 // The recording's runtime helper comes from the sibling conventions checkout, so a take can use
-// the input overlay before it is released.
+// the input overlay before it is released. The sibling sits beside the repository root, not beside
+// this project.
 workspaceDependencies {
 	siblingMaven('MinecraftModConventions') {
 		coordinate = "io.github.brainage04:minecraftmodconventions:${minecraftmodconventions_version}"
+		siblingDirectory = rootProject.layout.projectDirectory.dir('../MinecraftModConventions')
 	}
 }
