@@ -127,7 +127,7 @@ public final class AcceleratedDamageGameTestScenarios {
             assertEquals(
                     8,
                     victim.damageCooldownTime,
-                    "Expected a rejected hit not to mutate invincibility time");
+                    "Expected a rejected hit not to mutate the damage cooldown");
             assertEquals(
                     5, victim.hurtDuration, "Expected a rejected hit not to mutate hurt duration");
             assertEquals(

@@ -22,4 +22,4 @@ heavy status
 GTR_RECORDING_PROFILE=showcase heavy --mem 6G --label accelerateddamage-recording -- ./gradlew --no-daemon :fabric:recordClientGameTest
 ```
 
-Recordings and their JSON metadata are written to `build/recordings`. The showcase covers rapid melee against a player target with its health printed after each hit, drowning, bow, crossbow, trident and crossbow firework rockets fired several times inside one cooldown window, and accelerated fire and poison; every stage is followed by the same actions with the rule off, where only the first hit of each window lands.
+Recordings and their JSON metadata are written to `build/recordings`. The showcase covers rapid melee against a player target with its health printed after each hit, drowning, bow, crossbow, trident, and accelerated fire and poison on a mob. Each stage is followed by the same actions with the rule off, where only the first hit of each window lands. The crossbow firework case is covered by the server GameTest.

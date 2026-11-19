@@ -12,8 +12,8 @@ import net.minecraft.world.level.GameType;
 
 /// A player joined to the test server through `PlayerList.placeNewPlayer`, so it is in the level
 /// and the player list. `GameTestHelper#makeMockServerPlayerInLevel` is `@Deprecated(forRemoval =
-/// true)` in 26.3 (`GameTestHelper.java:395`) and deleted in a later release; this is the same join
-/// it performs.
+/// true)` in 26.3 (`GameTestHelper.java:395`), which the conventions' deprecated-API check fails
+/// the build on; this is the same join it performs.
 final class TestPlayers {
     private TestPlayers() {}
 
