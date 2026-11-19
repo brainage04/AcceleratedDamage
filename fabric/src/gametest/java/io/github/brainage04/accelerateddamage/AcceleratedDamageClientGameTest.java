@@ -856,15 +856,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             boolean rulesOn) {
         String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
         String title = "Attack indicator, effect rule " + (rulesOn ? "on" : "off");
-        openStage(context, stage, title, "one sword hit, then the indicator refills");
+        openStage(context, stage, title, "one mace hit, then the indicator refills");
         server.runOnServer(
                 current -> {
                     setDamageRules(current, false, false);
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, rulesOn, current);
+                    ServerPlayer player = player(current, playerId);
+                    player.getInventory().setItem(0, new ItemStack(Items.MACE));
+                    player.getInventory().setSelectedSlot(0);
                     resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
                 });
+        // The client's own hand must hold the mace before the attack key sends anything.
+        context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
         ClientGameTestPlayerActions.attackEntity(context, targetId);
         // The client resets its own attack-strength ticker on the attack packet, so the first
         // frame after it shows the indicator empty and the following ones fill it. The stage holds
@@ -896,9 +901,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + " delay="
                             + reading[1]);
         }
-        // A wooden sword's vanilla delay is 20 / 1.6 = 12.5 ticks, so four ticks leave the
-        // indicator about a third full; the synced attack speed makes it a tenth, 1.25 ticks, so
-        // the same four ticks fill it.
+        // The mace's attack speed is 4.0 - 3.4 = 0.6 (MaceItem.java:42, 26.3), so its vanilla
+        // delay is 20 / 0.6 = 33.3 ticks and four ticks leave the indicator an eighth full; the
+        // synced attack speed makes the delay 3.3 ticks, so the same four ticks fill it.
         if (rulesOn && charge < 1.0F) {
             throw new AssertionError(
                     "Expected the client's attack indicator to be full "
@@ -915,6 +920,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + " ticks after a hit with the effect rule off, its charge is "
                             + charge
                             + " and its delay "
+                            + delay);
+        }
+        if (rulesOn && delay > 4.0F) {
+            throw new AssertionError(
+                    "Expected the client's attack delay to be a tenth of the mace's vanilla 33.3"
+                            + " ticks with the effect rule on, it is "
                             + delay);
         }
         closeStage(context, stage, 4);
