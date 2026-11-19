@@ -2,9 +2,6 @@ package io.github.brainage04.accelerateddamage.gametest;
 
 import com.mojang.authlib.GameProfile;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
-import java.lang.reflect.Field;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
