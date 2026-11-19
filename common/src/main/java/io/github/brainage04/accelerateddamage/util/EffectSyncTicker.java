@@ -14,8 +14,9 @@ public final class EffectSyncTicker {
         platform.registerEndServerTick(EffectSyncTicker::syncEffects);
     }
 
-    /// The client counts an effect down once per tick, so a resend every ten server ticks keeps its
-    /// copy within one accelerated window of the server's.
+    /// The client counts an effect down once per tick while the accelerated server counts it down
+    /// ten times, so between resends the client's copy runs up to 90 ticks ahead of the server's.
+    /// Resending every ten server ticks keeps that drift bounded.
     static boolean shouldSync(int tickCount, boolean fasterEffectTicking) {
         return tickCount % 10 == 0 && fasterEffectTicking;
     }

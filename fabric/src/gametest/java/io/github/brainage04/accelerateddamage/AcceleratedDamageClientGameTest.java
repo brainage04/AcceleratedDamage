@@ -41,7 +41,8 @@ import net.minecraft.world.phys.Vec3;
 /// The showcase the owner asked for: the melee and ranged stages hit player-shaped targets and the
 /// environmental stage burns and poisons a mob, with the target's health printed in the caption
 /// panel after each hit, so a hit landing is visible twice. Each positive stage is followed by the
-/// same actions with the rule off, where the repeat hits do nothing. All player actions go through
+/// same actions with the rule off, where the repeat hits do nothing. The fire and poison stage is
+/// compared against a fresh mob instead. All player actions go through
 /// `ClientGameTestPlayerActions`, so the player only ever turns to a target, walks into vanilla
 /// reach and presses the real attack or use key on the crosshair target.
 @SuppressWarnings("UnstableApiUsage")
@@ -693,9 +694,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return label.toString();
     }
 
-    /// The client's copy of an effect must not drift from the server's. In this test the client
-    /// runs the mod too, so its own countdown is accelerated as well and this only catches a resend
-    /// that arrives late or not at all. `EffectSyncTickerTest` covers the resend cadence itself.
+    /// The client's copy of an effect must not drift more than 20 ticks from the server's. In this
+    /// test the client runs the mod too, so its own countdown is accelerated as well and a missing
+    /// resend is invisible here; `EffectSyncTickerTest` covers the resend cadence itself.
     private static void assertClientEffectDurationSynchronized(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         server.runOnServer(
