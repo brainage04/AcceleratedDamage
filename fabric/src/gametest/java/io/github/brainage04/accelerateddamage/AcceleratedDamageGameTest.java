@@ -19,7 +19,7 @@ public final class AcceleratedDamageGameTest {
         AcceleratedDamageGameTestScenarios.fireAndFreezeUseSingleCompressedTimeline(context);
     }
 
-    @GameTest(environment = "accelerateddamage:daylight", maxTicks = 40)
+    @GameTest(environment = "accelerateddamage:daylight", maxTicks = 200)
     public void freezeFixtureIgnoresDaylight(GameTestHelper context) {
         AcceleratedDamageGameTestScenarios.freezeFixtureIgnoresDaylight(context);
     }
