@@ -22,7 +22,6 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class RangedCrossbowAttackGoalMixin {
     @Shadow private int attackDelay;
 
-    /** Virtual ticks the accelerated charge ran past the charge duration before it was released. */
     @Unique private int acceleratedDamage$chargeOverrun;
 
     /**

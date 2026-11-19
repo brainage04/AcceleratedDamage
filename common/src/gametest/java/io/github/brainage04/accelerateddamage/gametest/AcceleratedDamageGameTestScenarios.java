@@ -2,7 +2,9 @@ package io.github.brainage04.accelerateddamage.gametest;
 
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.GameTestSequence;
@@ -11,6 +13,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.AreaEffectCloud;
@@ -29,7 +32,10 @@ import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.TridentItem;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -134,6 +140,22 @@ public final class AcceleratedDamageGameTestScenarios {
                     5,
                     victim.hurtTime,
                     "Expected a rejected hit not to mutate hurt animation time");
+
+            rules.set(ModGameRules.DISABLE_IFRAMES, true, server);
+            victim = createZombie(level);
+            assertTrue(
+                    victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
+                    "Expected the first contact hit to apply with both rules on");
+            assertTrue(
+                    victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
+                    "Expected a second contact hit in the same server tick to bypass invincibility with both rules on");
+            victim = createZombie(level);
+            assertTrue(
+                    victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
+                    "Expected the first fire hit to apply with both rules on");
+            assertTrue(
+                    victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
+                    "Expected a second fire hit in the same server tick to bypass invincibility with both rules on");
         } finally {
             setRules(rules, server, false, false, false, false);
         }
@@ -241,6 +263,47 @@ public final class AcceleratedDamageGameTestScenarios {
         }
 
         context.succeed();
+    }
+
+    public static void freezeFixtureIgnoresDaylight(GameTestHelper context) {
+        ServerLevel level = context.getLevel();
+        MinecraftServer server = level.getServer();
+        GameRules rules = level.getGameRules();
+        context.startSequence()
+                .thenWaitUntil(
+                        () ->
+                                assertTrue(
+                                        level.getSkyDarken() == 0,
+                                        "Waiting for the daylight environment to brighten the sky"))
+                .thenExecute(
+                        () -> {
+                            try {
+                                for (boolean faster : new boolean[] {false, true}) {
+                                    setRules(rules, server, true, faster, false, false);
+                                    float expected = faster ? 10.0F : 19.0F;
+                                    for (int trial = 0; trial < 50; trial++) {
+                                        Zombie zombie = createZombie(level);
+                                        assertTrue(
+                                                level.environmentAttributes()
+                                                        .getValue(
+                                                                EnvironmentAttributes.MONSTERS_BURN,
+                                                                zombie.position()),
+                                                "Expected daylight to burn undead where the freeze fixture runs");
+                                        zombie.setHealth(20.0F);
+                                        zombie.setTicksFrozen(
+                                                zombie.getTicksRequiredToFreeze() + 200);
+                                        tickFreeze(zombie, 10);
+                                        assertEquals(
+                                                expected,
+                                                zombie.getHealth(),
+                                                "Expected the freeze fixture to take only freeze damage in daylight");
+                                    }
+                                }
+                            } finally {
+                                setRules(rules, server, false, false, false, false);
+                            }
+                        })
+                .thenSucceed();
     }
 
     public static void effectCadenceDurationAndTransitions(GameTestHelper context) {
@@ -542,6 +605,7 @@ public final class AcceleratedDamageGameTestScenarios {
                     directProjectilesAt(level, player, target[0], "trident");
                 });
         sequence.thenWaitUntil(() -> assertDamaged(target[0], "trident"));
+        sequence.thenExecute(() -> assertRiptideKeepsVanillaChargeTime(context, player));
         sequence.thenExecute(
                 () -> {
                     target[0].discard();
@@ -574,6 +638,43 @@ public final class AcceleratedDamageGameTestScenarios {
                     removePlayer(server, player);
                 });
         sequence.thenSucceed();
+    }
+
+    private static void assertRiptideKeepsVanillaChargeTime(
+            GameTestHelper context, ServerPlayer player) {
+        ServerLevel level = context.getLevel();
+        BlockPos feet = player.blockPosition();
+        BlockState feetBlock = level.getBlockState(feet);
+        BlockState headBlock = level.getBlockState(feet.above());
+        try {
+            setRules(level.getGameRules(), level.getServer(), false, false, false, true);
+            level.setBlockAndUpdate(feet, Blocks.WATER.defaultBlockState());
+            level.setBlockAndUpdate(feet.above(), Blocks.WATER.defaultBlockState());
+            player.baseTick();
+            assertTrue(
+                    player.isInWaterOrRain(),
+                    "Expected the riptide fixture to put the player in water");
+            ItemStack trident = new ItemStack(Items.TRIDENT);
+            trident.enchant(
+                    level.registryAccess()
+                            .lookupOrThrow(Registries.ENCHANTMENT)
+                            .getOrThrow(Enchantments.RIPTIDE),
+                    3);
+            player.setItemInHand(InteractionHand.MAIN_HAND, trident);
+            TridentItem item = (TridentItem) Items.TRIDENT;
+            assertFalse(
+                    item.releaseUsing(trident, level, player, trident.getUseDuration(player) - 1),
+                    "Expected a one-tick riptide release to keep vanilla's charge time");
+            assertFalse(
+                    player.isAutoSpinAttack(),
+                    "Expected a one-tick riptide release not to start a spin the client never launches");
+            assertTrue(
+                    item.releaseUsing(trident, level, player, trident.getUseDuration(player) - 10),
+                    "Expected a riptide release after vanilla's charge time to launch");
+        } finally {
+            level.setBlockAndUpdate(feet, feetBlock);
+            level.setBlockAndUpdate(feet.above(), headBlock);
+        }
     }
 
     private static int serverTicksUntilFangsBite(GameTestHelper context) {
@@ -624,6 +725,12 @@ public final class AcceleratedDamageGameTestScenarios {
     }
 
     private static void tickFreeze(Zombie zombie, int applications) {
+        // aiStep also runs the zombie's randomized sunlight ignition (Mob.java:485-514, 26.2),
+        // whose fire
+        // damage would add to the freeze damage. A helmet blocks the ignition, and freeze damage
+        // bypasses
+        // armor (DamageTypeTagsProvider BYPASSES_ARMOR), so the expected counts are unchanged.
+        zombie.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
         for (int application = 1; application <= applications; application++) {
             zombie.setTicksFrozen(zombie.getTicksRequiredToFreeze() + 20);
             zombie.tickCount = application * 4;

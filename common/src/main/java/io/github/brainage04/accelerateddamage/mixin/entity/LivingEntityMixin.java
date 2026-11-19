@@ -42,8 +42,6 @@ public abstract class LivingEntityMixin {
         if (self.level() instanceof ServerLevel level
                 && level.getGameRules().get(ModGameRules.DISABLE_IFRAMES)) {
             self.damageCooldownTime = Math.min(self.damageCooldownTime, 10);
-            self.hurtDuration = 0;
-            self.hurtTime = 0;
             return self.damageCooldownTime;
         }
         return VirtualTime.isEnabled(self.level())

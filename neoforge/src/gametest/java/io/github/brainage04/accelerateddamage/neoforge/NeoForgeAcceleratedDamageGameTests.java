@@ -1,8 +1,10 @@
 package io.github.brainage04.accelerateddamage.neoforge;
 
 import io.github.brainage04.accelerateddamage.AcceleratedDamage;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageAllEntitiesScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageGameTestScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageKnockbackScenarios;
+import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamagePlayerAttackSpeedScenarios;
 import io.github.brainage04.accelerateddamage.gametest.AcceleratedDamageTimerScenarios;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -24,6 +26,10 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 BuiltInRegistries.TEST_FUNCTION.key(),
                 id("fire_and_freeze_use_single_compressed_timeline"),
                 () -> AcceleratedDamageGameTestScenarios::fireAndFreezeUseSingleCompressedTimeline);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("freeze_fixture_ignores_daylight"),
+                () -> AcceleratedDamageGameTestScenarios::freezeFixtureIgnoresDaylight);
         event.register(
                 BuiltInRegistries.TEST_FUNCTION.key(),
                 id("effect_cadence_duration_and_transitions"),
@@ -92,6 +98,24 @@ public final class NeoForgeAcceleratedDamageGameTests {
                 BuiltInRegistries.TEST_FUNCTION.key(),
                 id("snowballs_knock_back_without_damage"),
                 () -> AcceleratedDamageKnockbackScenarios::snowballsKnockBackWithoutDamage);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("every_entity_attacks_and_takes_damage_ten_times_faster"),
+                () ->
+                        AcceleratedDamageAllEntitiesScenarios
+                                ::everyEntityAttacksAndTakesDamageTenTimesFaster);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("player_attack_speed_is_synced_to_the_client"),
+                () ->
+                        AcceleratedDamagePlayerAttackSpeedScenarios
+                                ::playerAttackSpeedIsSyncedToTheClient);
+        event.register(
+                BuiltInRegistries.TEST_FUNCTION.key(),
+                id("player_attack_speed_survives_join_respawn_and_dimension_change"),
+                () ->
+                        AcceleratedDamagePlayerAttackSpeedScenarios
+                                ::playerAttackSpeedSurvivesJoinRespawnAndDimensionChange);
     }
 
     private static Identifier id(String path) {

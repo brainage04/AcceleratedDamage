@@ -16,7 +16,7 @@ Minecraft 26.3 separated this window from a new temporary invulnerability that, 
 
 Runs damage and healing over time ten times faster, as if each server tick were ten vanilla ticks: status effects, fire, freezing (including powder snow build-up), drowning and drying out, hunger-based and Peaceful regeneration, starvation, bees dying after they sting, lingering potion and dragon's breath clouds, beacon and conduit pulses (conduits also attack ten times as often), and the self-healing of allays, horses, happy ghasts, the wither and the ender dragon.
 
-Mob attacks use the same timeline: melee cooldowns, ranged attack intervals, bow draw and crossbow charge for mobs, and the wind-ups and cooldowns of guardian beams, blaze and ghast fireballs, shulker bullets, evoker fangs and vex summoning, creeper fuses, ravager roars, phantom swoops, wither skulls, ender dragon fireballs and breath, warden sonic booms, breeze wind charges, goat rams and frog tongues. Movement, pathfinding and targeting stay at normal speed, and so do spear charges, whose damage depends on speed.
+Mob and player attacks use the same timeline: melee cooldowns, ranged attack intervals, bow draw and crossbow charge, and the wind-ups and cooldowns of guardian beams, blaze and ghast fireballs, shulker bullets, evoker fangs and vex summoning, creeper fuses, ravager roars, phantom swoops, wither skulls, ender dragon fireballs and breath, warden sonic booms, breeze wind charges, goat rams and frog tongues. A player's attack cooldown is ten times shorter too, and the client sees it: the mod raises the player's attack speed attribute, which the server syncs, so the attack indicator, the hand-swap animation and a spear's stab gate all run on the same shorter delay. Movement, pathfinding and targeting stay at normal speed, and so do spear charges, whose damage depends on speed.
 
 The damage invincibility window gets the same 10× compression and lasts one server tick. As a result, repeated contact damage (cactus, lava, fire, magma, suffocation, cramming, the world border) lands ten times as often, while the vanilla cap on how often damage can land is kept. The shorter window also applies to melee and projectile hits.
 
@@ -24,9 +24,11 @@ The damage invincibility window gets the same 10× compression and lasts one ser
 
 Makes server-authoritative attacks fully charged immediately, independently of server tick rate.
 
+The client keeps vanilla's cooldown for this rule, because the rule is applied on the server only. The attack indicator therefore still fills at vanilla speed after each attack, and a spear stab is still held back until the spear is fully charged.
+
 ### Instant shooting
 
-Fully charges bows and crossbows immediately and removes the trident's minimum throw time.
+Fully charges bows and crossbows immediately and removes the trident's minimum throw time. Riptide keeps its vanilla charge time, because only the player's client can launch the player.
 
 ## Getting started
 
@@ -49,8 +51,8 @@ Use vanilla's gamerule command to query or update a rule:
 | Gamerule | Effect |
 | --- | --- |
 | `accelerateddamage:disable_i_frames` | Disables damage invincibility. |
-| `accelerateddamage:faster_effect_ticking` | Runs damage, healing and mob attack timers ten times faster. |
-| `accelerateddamage:disable_attack_cooldown` | Makes attacks fully charged immediately. |
+| `accelerateddamage:faster_effect_ticking` | Runs damage, healing and mob attack timers ten times faster, and gives players ten times their attack speed. |
+| `accelerateddamage:disable_attack_cooldown` | Makes attacks fully charged immediately on the server. |
 | `accelerateddamage:instant_shoot` | Removes bow, crossbow and trident charge time. |
 
 ## Compatibility

@@ -1,16 +1,16 @@
 # AcceleratedDamage icon
 
-## What this is
+## The icon file
 
-`docs/icon/icon.png` — the mod's icon: 512x512 PNG, 8-bit RGBA, non-interlaced, 2 893 bytes,
+`docs/icon/icon.png` is the mod's icon: 512x512 PNG, 8-bit RGBA, non-interlaced, 2 893 bytes,
 sha256 `d05b9159a3bb46f5f3020a808a9e79e0bab2ee892ddecf592b87dec12ec9a1d6`.
 The mod ships byte-identical copies at `common/src/main/resources/assets/accelerateddamage/icon.png`
 and `fabric/src/gametest/resources/assets/accelerateddamage/icon.png`.
 
 ## How it was made
 
-**Generated pixel art derived from real vanilla HUD/effect textures** — no renderer, no ML,
-no antialiasing. `provenance/pixel2/render.py` (Pillow 12.3.0) composes it deterministically
+The icon is generated pixel art derived from real vanilla HUD and effect textures, with no
+renderer, no ML and no antialiasing. `provenance/pixel2/render.py` (Pillow 12.3.0) composes it deterministically
 with integer/nearest-neighbour operations only:
 
 1. The real Speed status-effect sprite (18x18) is scaled **2x with NEAREST** as the
@@ -18,7 +18,7 @@ with integer/nearest-neighbour operations only:
 2. The hardcore heart is assembled at its **native 9x9** size
    (`container_hardcore` outline + `hardcore_half` fill, alpha-composited) and scaled 2x to
    18x18. The approved composition (variant `down1-left7`) pastes it at (2, 10) on the 36x36
-   canvas — **1 px down and 7 px left** of its centred position.
+   canvas, **1 px down and 7 px left** of its centred position.
 3. Revision of 2026-10-02 (owner): 2 px are cropped off every side (36x36 → 32x32, which
    puts the heart at (0, 8)), the heart is then moved **2 px right** to (2, 8), and the
    32x32 result is enlarged **16x with NEAREST** to 512x512 (the icon rule: square, a power
