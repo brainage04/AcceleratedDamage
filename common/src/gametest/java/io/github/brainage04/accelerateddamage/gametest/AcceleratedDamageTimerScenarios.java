@@ -200,7 +200,6 @@ public final class AcceleratedDamageTimerScenarios {
 
     public static void beaconAndConduitPulses(GameTestHelper context) {
         ServerLevel level = context.getLevel();
-        // Tick both blocks at an accelerated pulse boundary that is not a vanilla pulse boundary.
         context.startSequence()
                 .thenWaitUntil(() -> context.assertTrue(level.getGameTime() % 80L == 8L,
                         "Waiting for a non-vanilla beacon and conduit pulse boundary"))
