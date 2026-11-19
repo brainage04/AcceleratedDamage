@@ -831,7 +831,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         meleeHalf(context, server, playerId, targetId, true);
         cooldownHalf(context, server, playerId, targetId, false);
         cooldownHalf(context, server, playerId, targetId, true);
-        server.runOnServer(current -> parkTarget(current, targetId));
+        server.runOnServer(
+                current -> {
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
+                    parkTarget(current, targetId);
+                });
     }
 
     /// One sword hit, then the crosshair's attack indicator refilling: the client's own charge
