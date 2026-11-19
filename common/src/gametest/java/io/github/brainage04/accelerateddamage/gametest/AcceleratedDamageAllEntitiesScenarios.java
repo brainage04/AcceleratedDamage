@@ -51,7 +51,7 @@ public final class AcceleratedDamageAllEntitiesScenarios {
             // 26.2), which makes it immune to every source until the 60-tick timeout runs out
             // (ServerGamePacketListenerImpl.java:2214-2216).
             player.getAbilities().invulnerable = false;
-            player.setInvulnerable(false);
+            player.setPermanentlyInvulnerable(false);
             for (int tick = 0; tick < 60; tick++) {
                 player.connection.tickClientLoadTimeout();
             }

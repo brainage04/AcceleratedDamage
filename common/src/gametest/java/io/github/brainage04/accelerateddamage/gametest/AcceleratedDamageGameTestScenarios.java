@@ -142,14 +142,14 @@ public final class AcceleratedDamageGameTestScenarios {
                     "Expected a rejected hit not to mutate hurt animation time");
 
             rules.set(ModGameRules.DISABLE_IFRAMES, true, server);
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(
                     victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
                     "Expected the first contact hit to apply with both rules on");
             assertTrue(
                     victim.hurtServer(level, level.damageSources().cactus(), 1.0F),
                     "Expected a second contact hit in the same server tick to bypass invincibility with both rules on");
-            victim = createZombie(level);
+            victim = createZombie(context);
             assertTrue(
                     victim.hurtServer(level, level.damageSources().onFire(), 1.0F),
                     "Expected the first fire hit to apply with both rules on");
@@ -282,7 +282,7 @@ public final class AcceleratedDamageGameTestScenarios {
                                     setRules(rules, server, true, faster, false, false);
                                     float expected = faster ? 10.0F : 19.0F;
                                     for (int trial = 0; trial < 50; trial++) {
-                                        Zombie zombie = createZombie(level);
+                                        Zombie zombie = createZombie(context);
                                         assertTrue(
                                                 level.environmentAttributes()
                                                         .getValue(
