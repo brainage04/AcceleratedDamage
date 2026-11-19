@@ -6,6 +6,7 @@ import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestCommands;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestPlayerActions;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestRecorder;
+import io.github.brainage04.minecraftmodconventions.ClientGameTestRecordingHud;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
@@ -1391,11 +1392,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 String[] label =
                         server.computeOnServer(current -> caption(current, shown, scene, rulesOn));
                 int now = serverTick;
-                if (tick % READING_TICKS == 0) {
-                    ClientGameTestRecorder.showStep(context, stage, label[0], label[1]);
-                    pushed = label;
-                }
                 requireCaptionFollowsHealth(stage, scene, now, staleSince, pushed, label);
+                // The caption carries the health numbers, so it is pushed on every tick: a number
+                // that changes on a tick is on screen on the next frame.
+                context.runOnClient(
+                        _ -> ClientGameTestRecordingHud.showStep(stage, label[0], label[1]));
+                pushed = label;
                 if (tick % READING_TICKS == 0) {
                     String airLabel =
                             server.computeOnServer(current -> airLine(current, shown, scene));
