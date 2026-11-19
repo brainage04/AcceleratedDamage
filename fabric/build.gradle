@@ -1,0 +1,7 @@
+// The recording's runtime helper comes from the sibling conventions checkout, so a take can use
+// the input overlay before it is released.
+workspaceDependencies {
+	siblingMaven('MinecraftModConventions') {
+		coordinate = "io.github.brainage04:minecraftmodconventions:${minecraftmodconventions_version}"
+	}
+}
