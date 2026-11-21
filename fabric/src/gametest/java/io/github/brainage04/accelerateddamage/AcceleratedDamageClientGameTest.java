@@ -175,6 +175,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int REGENERATION_AMPLIFIER = 1;
 
     /// Long enough to outlast a half with the rules on, which burn ten ticks of it every tick.
+    /// The speed effect the client-duration check reads uses the same length.
     private static final int REGENERATION_TICKS = 1200;
 
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
@@ -1598,6 +1599,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                                 entity(current, id)
                                                         .setPermanentlyInvulnerable(false));
                                 scene.start().begin(current, placed);
+                                if (rulesOn) {
+                                    // The recording player's own effect is what the client can be
+                                    // compared against: EffectSyncTicker resends an effect to its
+                                    // holder's connection, and the only connection a real client
+                                    // holds is its own player's.
+                                    player(current, playerId)
+                                            .addEffect(
+                                                    new MobEffectInstance(
+                                                            MobEffects.SPEED, REGENERATION_TICKS));
+                                }
                                 for (Map.Entry<String, Optional<Holder<MobEffect>>> healer :
                                         scene.healers().entrySet()) {
                                     LivingEntity target =
@@ -1644,6 +1655,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     + String.join(" | ", label)
                                     + airLabel);
                     requireShot(context, stage, "after " + tick + " ticks", shot);
+                    if (rulesOn && tick == READING_TICKS) {
+                        requireClientEffectDurationSynchronized(
+                                context, server, playerId, stage);
+                        // The check waits for a resend tick, so the caption it left on screen is
+                        // older than the freshness bound allows; push it again from here.
+                        String[] refreshed =
+                                server.computeOnServer(
+                                        current -> caption(current, shown, scene, rulesOn));
+                        context.runOnClient(
+                                _ ->
+                                        ClientGameTestRecordingHud.showStep(
+                                                stage, refreshed[0], refreshed[1]));
+                        pushedTick = serverTick;
+                    }
                 }
             }
             Map<String, HealLog> halfHeals = new LinkedHashMap<>();
@@ -1675,9 +1700,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             for (int index = 0; index < count; index++) {
                 change[half][index] = end[index] - start[index];
             }
-            if (rulesOn) {
-                requireClientEffectDurationSynchronized(context, server, scene, shown);
-            }
             closeStage(context, stage, 4);
         }
         List<Integer> finished = targets;
@@ -1691,85 +1713,59 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         assertEffectsAccelerated(scene, change);
     }
 
-    /// Fails unless a vanilla client holds the same effect durations the server does. The server
-    /// burns ten durations a tick with the rule on ({@code MobEffectInstanceMixin}), and
-    /// {@code EffectSyncTicker} resends every effect every ten ticks, so a client that never
-    /// received those packets would still show the vanilla duration, hundreds of ticks ahead. The
-    /// reading is taken one tick after a resend, when the client has just applied it.
+    /// Fails unless the vanilla client holds the same effect duration the server does for the
+    /// recording player. The server burns ten durations a tick with the rule on
+    /// ({@code MobEffectInstanceMixin}), and {@code EffectSyncTicker} resends every effect to its
+    /// own holder's connection every ten ticks, so a client that never received those packets
+    /// would still show the vanilla duration, hundreds of ticks ahead. The reading is taken one
+    /// tick after a resend, when the client has just applied it.
     private static void requireClientEffectDurationSynchronized(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
-            EffectScene scene,
-            List<Integer> shown) {
+            int playerId,
+            String stage) {
         while (server.computeOnServer(_ -> serverTick) % 10 != 1) {
             context.waitTick();
         }
-        List<String> failures = new ArrayList<>();
-        int compared = 0;
-        for (int index = 0; index < shown.size(); index++) {
-            int id = shown.get(index);
-            String name = scene.names().get(index);
-            Map<Holder<MobEffect>, Integer> serverDurations =
-                    server.computeOnServer(
-                            current -> {
-                                Map<Holder<MobEffect>, Integer> durations = new LinkedHashMap<>();
-                                for (MobEffectInstance effect :
-                                        living(current, id).getActiveEffects()) {
-                                    durations.put(effect.getEffect(), effect.getDuration());
-                                }
-                                return durations;
-                            });
-            if (serverDurations.isEmpty()) {
-                continue;
-            }
-            Map<Holder<MobEffect>, Integer> clientDurations =
-                    context.computeOnClient(
-                            client -> {
-                                Map<Holder<MobEffect>, Integer> durations = new LinkedHashMap<>();
-                                Entity entity = client.level.getEntity(id);
-                                if (!(entity instanceof LivingEntity living)) {
-                                    return durations;
-                                }
-                                for (MobEffectInstance effect : living.getActiveEffects()) {
-                                    durations.put(effect.getEffect(), effect.getDuration());
-                                }
-                                return durations;
-                            });
-            for (Map.Entry<Holder<MobEffect>, Integer> effect : serverDurations.entrySet()) {
-                compared++;
-                Integer clientDuration = clientDurations.get(effect.getKey());
-                if (clientDuration == null) {
-                    failures.add(
-                            name
-                                    + " is missing "
-                                    + effect.getKey().value().getDescriptionId()
-                                    + " on the client");
-                } else if (Math.abs(clientDuration - effect.getValue())
-                        > EFFECT_SYNC_TOLERANCE_TICKS) {
-                    failures.add(
-                            name
-                                    + "'s "
-                                    + effect.getKey().value().getDescriptionId()
-                                    + " is "
-                                    + clientDuration
-                                    + " on the client and "
-                                    + effect.getValue()
-                                    + " on the server");
-                }
-            }
-        }
-        if (compared == 0) {
+        int serverDuration =
+                server.computeOnServer(
+                        current -> {
+                            MobEffectInstance effect =
+                                    player(current, playerId).getEffect(MobEffects.SPEED);
+                            if (effect == null) {
+                                throw new AssertionError(
+                                        "Expected the recording player to hold the speed effect in "
+                                                + stage);
+                            }
+                            return effect.getDuration();
+                        });
+        int clientDuration =
+                context.computeOnClient(
+                        client -> {
+                            MobEffectInstance effect = client.player.getEffect(MobEffects.SPEED);
+                            if (effect == null) {
+                                throw new AssertionError(
+                                        "Expected the vanilla client to receive the speed effect in "
+                                                + stage);
+                            }
+                            return effect.getDuration();
+                        });
+        if (Math.abs(serverDuration - clientDuration) > EFFECT_SYNC_TOLERANCE_TICKS) {
             throw new AssertionError(
-                    "Expected showcase."
-                            + scene.id()
-                            + "-on to have an effect to compare between the server and the client");
+                    "Expected the accelerated effect duration to reach the vanilla client in "
+                            + stage
+                            + ": the server holds "
+                            + serverDuration
+                            + " and the client "
+                            + clientDuration);
         }
-        if (!failures.isEmpty()) {
-            throw new AssertionError(
-                    "Expected the accelerated effect durations to reach the vanilla client: "
-                            + String.join(", ", failures));
-        }
-        System.out.println("AD_EFFECT_SYNC showcase." + scene.id() + "-on compared=" + compared);
+        System.out.println(
+                "AD_EFFECT_SYNC "
+                        + stage
+                        + " server="
+                        + serverDuration
+                        + " client="
+                        + clientDuration);
     }
 
     private static LivingEntity healerOf(
