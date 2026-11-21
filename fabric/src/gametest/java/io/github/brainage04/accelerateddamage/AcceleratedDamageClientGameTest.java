@@ -42,6 +42,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -134,22 +135,38 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static final int READING_TICKS = 14;
 
-    /// Ticks between the sword hit of a cooldown stage and the reading of the client's charge: a
-    /// wooden sword's vanilla delay is 12.5 ticks, so the indicator is about a third full, and a
-    /// tenth of that fills it.
+    /// Ticks between the mace hit of a cooldown stage and the reading of the client's charge: the
+    /// mace's vanilla delay is 33.3 ticks, so the indicator is an eighth full, and a tenth of that
+    /// fills it.
     private static final int COOLDOWN_TICKS = 4;
 
-    /// Ticks a cooldown stage holds its picture, so the indicator's refill is on screen long enough
-    /// to read.
-    private static final int COOLDOWN_HOLD_TICKS = 40;
+    /// Ticks a cooldown stage holds its picture. At {@link #COOLDOWN_TICK_RATE} ticks a second that
+    /// is six seconds, long enough for the vanilla refill to climb most of the way and for the
+    /// accelerated one to fill twice.
+    private static final int COOLDOWN_HOLD_TICKS = 30;
 
     /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
     /// indicator fills between hits with the rule on, and far shorter than the vanilla one.
-    private static final int COOLDOWN_CADENCE_TICKS = 6;
+    private static final int COOLDOWN_CADENCE_TICKS = 15;
+
+    /// Ticks a second the game runs at for the two cooldown stages. The accelerated refill is 3.3
+    /// ticks, a sixth of a second at the vanilla 20, which a 30 fps capture shows as a flicker; at
+    /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
+    private static final float COOLDOWN_TICK_RATE = 5.0F;
+
+    /// Ticks the client holds a spear before its own stab gate is read. The accelerated delay is
+    /// 2.3 ticks, so the gate accepts the stab well inside this; the vanilla 23-tick delay would
+    /// still refuse it.
+    private static final int SPEAR_GATE_TICKS = 8;
 
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on a
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
+
+    /// How far a client's effect duration may sit from the server's: the server burns ten
+    /// durations a tick and resends every ten ticks, so a client that received the last resend
+    /// holds a duration up to ten ticks behind, and one that missed it is hundreds ahead.
+    private static final int EFFECT_SYNC_TOLERANCE_TICKS = 20;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
 
@@ -465,16 +482,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                             return recordingPlayerId(current);
                                         });
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
-                        context.waitTicks(20);
+                        // The film is cut to its stage markers, so the first marker has to be the
+                        // first frame worth showing: the world is drawn and settled before the
+                        // title card goes up, and the join and the loading wall stay outside it.
+                        ClientGameTestWaits.waitForChunkWindow(context, 4, 200);
+                        ClientGameTestWaits.waitForRenderSettled(context, 4, 200);
                         // The title card covers the tour that loads every viewpoint, so the first
                         // scenario never opens on an unloaded chunk.
-                        ClientGameTestRecorder.showStep(
+                        openStage(
                                 context,
                                 "showcase.ready",
                                 "Accelerated Damage",
                                 "Four rules, every hit and every effect");
                         preloadArena(context, server, playerId);
-                        context.waitTicks(10);
+                        closeStage(context, "showcase.ready", 10);
 
                         recordMelee(context, server, playerId);
                         recordBow(context, server, playerId);
@@ -514,6 +535,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 AcceleratedDamageClientGameTest::chest,
                                 slot -> new ItemStack(Items.TRIDENT),
                                 DRAW_CADENCE_TICKS);
+                        recordSpearGate(context, server, playerId);
                         recordEffectScene(context, server, playerId, effectsScene());
                         // Aimed at the target's eyes, the throw's lift of 20 degrees above the
                         // view (ThrowablePotionItem.java:26) brings the potion down on its body.
@@ -841,6 +863,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         cooldownHalf(context, server, playerId, targetId, true);
         server.runOnServer(
                 current -> {
+                    current.tickRateManager().setTickRate(20.0F);
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
@@ -848,10 +871,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
     }
 
-    /// One sword hit, then the crosshair's attack indicator refilling: the client's own charge
+    /// One mace hit, then the crosshair's attack indicator refilling: the client's own charge
     /// scale, which the synced attack speed shortens tenfold. The cooldown rule is off in both
-    /// halves, because with it on the client is always fully charged and the indicator never draws
-    /// (Hud.java:448-465 in the 26.3 sources).
+    /// halves, because with it on the server's own {@code getAttackStrengthScale} returns 1.0
+    /// ({@code PlayerMixin.acceleratedDamage$fullyChargeAttacks}) and the client, which never sees
+    /// that override, is left with its own scale.
+    ///
+    /// <p>The game runs at {@link #COOLDOWN_TICK_RATE} ticks a second for both halves. The
+    /// accelerated refill is 3.3 ticks, a sixth of a second at the vanilla 20, which a 30 fps
+    /// capture shows as a flicker; at 5 ticks a second it lasts two thirds of a second and the
+    /// vanilla one 6.7 seconds, so both are refills a viewer can follow.
     private static void cooldownHalf(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
@@ -860,13 +889,22 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             boolean rulesOn) {
         String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
         String title = "Attack indicator, effect rule " + (rulesOn ? "on" : "off");
-        openStage(context, stage, title, "a mace hit every 6 ticks, the indicator refills");
+        openStage(
+                context,
+                stage,
+                title,
+                "a mace hit every "
+                        + COOLDOWN_CADENCE_TICKS
+                        + " ticks, the game at "
+                        + (int) COOLDOWN_TICK_RATE
+                        + " ticks a second");
         server.runOnServer(
                 current -> {
                     setDamageRules(current, false, false);
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, rulesOn, current);
+                    current.tickRateManager().setTickRate(COOLDOWN_TICK_RATE);
                     ServerPlayer player = player(current, playerId);
                     player.getInventory().setItem(0, new ItemStack(Items.MACE));
                     player.getInventory().setSelectedSlot(0);
@@ -874,7 +912,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
         // The client's own hand must hold the mace before the attack key sends anything.
         context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
-        // A hit every six ticks: the client resets its own attack-strength ticker on the attack
+        // A hit every fifteen ticks: the client resets its own attack-strength ticker on the attack
         // packet, so the indicator empties and refills between hits. With the effect rule off the
         // mace's 33.3-tick delay leaves it crawling; with the rule on the synced 3.3-tick delay
         // fills it before the next hit.
@@ -964,7 +1002,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             context.waitTicks(INPUT_CADENCE_TICKS - 1);
             showHealth(context, server, targetId, stage, title, "hit " + hit);
         }
-        finishHalf(context, server, stage, MELEE_HITS, rulesOn);
+        finishHalf(
+                context, server, stage, title, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
     }
 
     private static void recordBow(
@@ -1008,7 +1047,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context.waitTicks(DRAW_CADENCE_TICKS - 1);
                 showHealth(context, server, targetId, stage, title, "shot " + shot);
             }
-            finishHalf(context, server, stage, BOW_SHOTS, rulesOn);
+            finishHalf(context, server, stage, title, "shot " + BOW_SHOTS, BOW_SHOTS, rulesOn);
         }
         server.runOnServer(current -> parkTarget(current, targetId));
     }
@@ -1068,7 +1107,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context.waitTicks(cadenceTicks - 1);
                 showHealth(context, server, targetId, stage, title, "shot " + shot);
             }
-            finishHalf(context, server, stage, HOTBAR_SHOTS, rulesOn);
+            finishHalf(
+                    context, server, stage, title, "shot " + HOTBAR_SHOTS, HOTBAR_SHOTS, rulesOn);
             float[] playerHealth =
                     server.computeOnServer(
                             current -> {
@@ -1084,6 +1124,79 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
         server.runOnServer(current -> parkTarget(current, targetId));
+    }
+
+    /// The vanilla client's own stab gate, which is what a spear waits on: {@code
+    /// Minecraft#startAttack} refuses the swing while {@code Player#cannotAttackWithItem} says the
+    /// charge is short ({@code Minecraft.java:1647} in the 26.3 sources), and a spear's {@code
+    /// MINIMUM_ATTACK_CHARGE} is 1.0 ({@code Item.java:552}). The client reads the attack speed the
+    /// server synced, so a few ticks after the spear arrives it must accept the stab; with the
+    /// vanilla delay it would refuse for 23 ticks.
+    private static void recordSpearGate(
+            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        String stage = "showcase.spear";
+        openStage(
+                context,
+                stage,
+                "A spear stabs on the accelerated cooldown",
+                "the vanilla client's own attack gate accepts the stab");
+        server.runOnServer(
+                current -> {
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
+                    ServerPlayer player = player(current, playerId);
+                    player.getInventory().clearContent();
+                    player.getInventory().setItem(0, new ItemStack(Items.NETHERITE_SPEAR));
+                    player.getInventory().setSelectedSlot(0);
+                    player.connection.send(new ClientboundSetHeldSlotPacket(0));
+                    player.resetAttackStrengthTicker();
+                });
+        // The client resets its own attack-strength ticker when the held item changes, so it needs
+        // a few ticks after the spear arrives; a spear's vanilla delay is 23 ticks, far more.
+        context.waitTicks(SPEAR_GATE_TICKS);
+        String violation =
+                context.computeOnClient(
+                        client -> {
+                            if (client.player == null) {
+                                return "the client player is not available";
+                            }
+                            ItemStack held = client.player.getMainHandItem();
+                            if (!held.is(Items.NETHERITE_SPEAR)) {
+                                return "the client holds " + held + ", not the spear";
+                            }
+                            if (client.player.cannotAttackWithItem(held, 0)) {
+                                return "the vanilla client still refuses a spear stab "
+                                        + SPEAR_GATE_TICKS
+                                        + " ticks after the spear arrived: attack speed "
+                                        + client.player.getAttributeValue(Attributes.ATTACK_SPEED)
+                                        + ", charge "
+                                        + client.player.getAttackStrengthScale(0.0F)
+                                        + ", delay "
+                                        + client.player.getCurrentItemAttackStrengthDelay();
+                            }
+                            return null;
+                        });
+        if (violation != null) {
+            throw new AssertionError(stage + ": " + violation);
+        }
+        System.out.println(
+                "AD_SPEAR "
+                        + stage
+                        + " accepted after "
+                        + SPEAR_GATE_TICKS
+                        + " ticks, delay "
+                        + context.computeOnClient(
+                                client -> client.player.getCurrentItemAttackStrengthDelay()));
+        context.waitTicks(HALF_TICKS - SPEAR_GATE_TICKS);
+        closeStage(context, stage, 4);
+        server.runOnServer(
+                current -> {
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
+                    player(current, playerId).getInventory().clearContent();
+                });
     }
 
     private static void fillHotbar(ServerPlayer player, IntFunction<ItemStack> weapon) {
@@ -1135,31 +1248,41 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context, stage, title, label + ", health " + health(health));
     }
 
-    /// Waits until every projectile of the half has reached the target, closes the server's log,
+    /// Waits until every projectile of the half has reached the target, pushing the caption on
+    /// every tick of the wait so the last hits' numbers reach the screen, closes the server's log,
     /// holds the picture until the half has run about two seconds, and checks the log.
     private static void finishHalf(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             String stage,
+            String title,
+            String lastLabel,
             int expectedInputs,
             boolean rulesOn) {
-        try {
-            ClientGameTestWaits.waitForServer(
-                    context,
-                    server,
-                    current -> {
-                        HitLog log = hitLog;
-                        return log.inputTicks.size() >= expectedInputs
-                                && log.hits.size() >= log.inputTicks.size();
-                    },
-                    60,
-                    "every attack or shot of " + stage + " to reach the target");
-        } catch (AssertionError timeout) {
-            throw new AssertionError(
-                    timeout.getMessage()
-                            + ": "
-                            + server.computeOnServer(current -> hitLog.describe()),
-                    timeout);
+        int targetId = server.computeOnServer(current -> hitLog.targetId);
+        for (int waited = 0; ; waited++) {
+            boolean landed =
+                    server.computeOnServer(
+                            current -> {
+                                HitLog log = hitLog;
+                                return log.inputTicks.size() >= expectedInputs
+                                        && log.hits.size() >= log.inputTicks.size();
+                            });
+            if (landed) {
+                break;
+            }
+            if (waited >= 60) {
+                throw new AssertionError(
+                        "Expected every attack or shot of "
+                                + stage
+                                + " to reach the target: "
+                                + server.computeOnServer(current -> hitLog.describe()));
+            }
+            context.waitTick();
+            // The last projectiles land after the last input, so the caption is pushed again on
+            // every tick of the wait: a number that changes on a tick is on screen on the next
+            // frame, and the hold that follows shows the target's final health.
+            showHealth(context, server, targetId, stage, title, lastLabel);
         }
         HitLog log =
                 server.computeOnServer(
@@ -1549,6 +1672,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             for (int index = 0; index < count; index++) {
                 change[half][index] = end[index] - start[index];
             }
+            if (rulesOn) {
+                requireClientEffectDurationSynchronized(context, server, scene, shown);
+            }
             closeStage(context, stage, 4);
         }
         List<Integer> finished = targets;
@@ -1560,6 +1686,87 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         assertHealingAccelerated(scene, heals);
         assertDrowning(scene, change, air);
         assertEffectsAccelerated(scene, change);
+    }
+
+    /// Fails unless a vanilla client holds the same effect durations the server does. The server
+    /// burns ten durations a tick with the rule on ({@code MobEffectInstanceMixin}), and
+    /// {@code EffectSyncTicker} resends every effect every ten ticks, so a client that never
+    /// received those packets would still show the vanilla duration, hundreds of ticks ahead. The
+    /// reading is taken one tick after a resend, when the client has just applied it.
+    private static void requireClientEffectDurationSynchronized(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            EffectScene scene,
+            List<Integer> shown) {
+        while (server.computeOnServer(_ -> serverTick) % 10 != 1) {
+            context.waitTick();
+        }
+        List<String> failures = new ArrayList<>();
+        int compared = 0;
+        for (int index = 0; index < shown.size(); index++) {
+            int id = shown.get(index);
+            String name = scene.names().get(index);
+            Map<Holder<MobEffect>, Integer> serverDurations =
+                    server.computeOnServer(
+                            current -> {
+                                Map<Holder<MobEffect>, Integer> durations = new LinkedHashMap<>();
+                                for (MobEffectInstance effect :
+                                        living(current, id).getActiveEffects()) {
+                                    durations.put(effect.getEffect(), effect.getDuration());
+                                }
+                                return durations;
+                            });
+            if (serverDurations.isEmpty()) {
+                continue;
+            }
+            Map<Holder<MobEffect>, Integer> clientDurations =
+                    context.computeOnClient(
+                            client -> {
+                                Map<Holder<MobEffect>, Integer> durations = new LinkedHashMap<>();
+                                Entity entity = client.level.getEntity(id);
+                                if (!(entity instanceof LivingEntity living)) {
+                                    return durations;
+                                }
+                                for (MobEffectInstance effect : living.getActiveEffects()) {
+                                    durations.put(effect.getEffect(), effect.getDuration());
+                                }
+                                return durations;
+                            });
+            for (Map.Entry<Holder<MobEffect>, Integer> effect : serverDurations.entrySet()) {
+                compared++;
+                Integer clientDuration = clientDurations.get(effect.getKey());
+                if (clientDuration == null) {
+                    failures.add(
+                            name
+                                    + " is missing "
+                                    + effect.getKey().value().getDescriptionId()
+                                    + " on the client");
+                } else if (Math.abs(clientDuration - effect.getValue())
+                        > EFFECT_SYNC_TOLERANCE_TICKS) {
+                    failures.add(
+                            name
+                                    + "'s "
+                                    + effect.getKey().value().getDescriptionId()
+                                    + " is "
+                                    + clientDuration
+                                    + " on the client and "
+                                    + effect.getValue()
+                                    + " on the server");
+                }
+            }
+        }
+        if (compared == 0) {
+            throw new AssertionError(
+                    "Expected showcase."
+                            + scene.id()
+                            + "-on to have an effect to compare between the server and the client");
+        }
+        if (!failures.isEmpty()) {
+            throw new AssertionError(
+                    "Expected the accelerated effect durations to reach the vanilla client: "
+                            + String.join(", ", failures));
+        }
+        System.out.println("AD_EFFECT_SYNC showcase." + scene.id() + "-on compared=" + compared);
     }
 
     private static LivingEntity healerOf(
@@ -1862,9 +2069,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Fails when the caption the client shows is older than {@link #CAPTION_LAG_TICKS}. The
-    /// caption carries every target's health, so its age is how far the numbers on screen can lag
-    /// the server's.
+    /// Fails when the caption was pushed more than {@link #CAPTION_LAG_TICKS} ticks ago. This
+    /// measures the push cadence, not the screen: {@code runOnClient} blocks until the client
+    /// thread has applied the push, and the HUD renders the step it holds every frame, so the
+    /// caption on screen is at most one tick older than the last push.
     private static void requireCaptionIsFresh(String stage, int now, int pushedTick) {
         if (now - pushedTick > CAPTION_LAG_TICKS) {
             throw new AssertionError(
@@ -2045,6 +2253,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setHealth(EFFECT_TARGET_HEALTH);
         target.getFoodData().setFoodLevel(17);
         target.getFoodData().setSaturation(0.0F);
+        // A projectile knocks its target along the line it came in on (LivingEntity.java:1293-1305
+        // and Projectile.java:444-448 in the 26.3 sources), which is towards the camera, and nine
+        // crossbow shots in a row walked the dummy into the lens. Full resistance zeroes the
+        // knockback before it moves anything (LivingEntity.java:1647-1649).
+        target.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1.0);
         target.setCustomName(Component.literal(name));
         target.setCustomNameVisible(true);
         DUMMIES.put(name, target.getId());
