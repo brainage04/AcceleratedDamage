@@ -454,7 +454,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 context,
                 "showcase.trident",
                 "Trident: five throws",
-                "The ten-tick wind-up is gone");
+                "Every throw releases at once");
         int targetId =
                 shootStage(
                         context,
