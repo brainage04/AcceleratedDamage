@@ -1284,6 +1284,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // frame, and the hold that follows shows the target's final health.
             showHealth(context, server, targetId, stage, title, lastLabel);
         }
+        // The loop breaks on the tick the last hit landed, before pushing that tick's caption, so
+        // the health the last hit left is pushed here.
+        showHealth(context, server, targetId, stage, title, lastLabel);
         HitLog log =
                 server.computeOnServer(
                         current -> {
