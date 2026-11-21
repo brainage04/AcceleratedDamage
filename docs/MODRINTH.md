@@ -1,154 +1,59 @@
-# Modrinth publishing
+# Modrinth and CurseForge publishing
 
-This template includes optional Modrinth publishing as part of `.github/workflows/release.yml`.
+A tag push sends AcceleratedDamage to GitHub, Modrinth and CurseForge. `.github/workflows/release.yml` holds one job, and that job calls `reusable-multiloader-release.yml` from `brainage04/MinecraftModConventions` at `v3.0.1`.
 
-After the GitHub release is created, a second job in the same workflow does two things:
+## The tag
 
-1. Creates the Modrinth project if a project with slug `mod_id` does not already exist.
-2. Uploads the built Fabric and NeoForge release jars as Modrinth versions if that `mod_version` has not already been uploaded.
+Nothing but a tag push starts the workflow. The tag is `v` plus `mod_version` from `gradle.properties`. With `mod_version=1.0.0` you push `v1.0.0`. A tag that does not match stops the run in the preparation job, before anything is built or uploaded.
 
-The Modrinth job is skipped unless the repository has a `MODRINTH_TOKEN` secret configured.
+## What gets built
 
-## Required secret
+Preparation runs `./gradlew clean build` and then looks in `build/libs` for two files. The Fabric release is `accelerateddamage-1.0.0.jar`. The NeoForge release is the single file matching `accelerateddamage-neoforge-*.jar`. If that pattern finds nothing, or finds two files, the release fails.
 
-Create a Modrinth personal access token and add it as a repository secret to the GitHub repository as `MODRINTH_TOKEN`.
+Both files go onto the GitHub release. This repository passes no `release_name`, so the title is just the tag, `v1.0.0`. The body is the annotated tag message. When the tag has no message, GitHub's generated notes are used. A hyphen anywhere in the tag, as in `v1.0.0-rc1`, marks the release as a prerelease.
 
-Minimum useful scopes:
+## Where it goes
 
-- `PROJECT_CREATE`
-- `PROJECT_READ`
-- `PROJECT_WRITE`
-- `VERSION_READ`
-- `VERSION_CREATE`
+Five jobs follow preparation, one per destination:
 
-The release workflow uses the Modrinth API directly:
+| Job | Publishes |
+| --- | --- |
+| `github` | the GitHub release with both JARs |
+| `modrinth-fabric` | the Fabric JAR to Modrinth |
+| `modrinth-neoforge` | the NeoForge JAR to the same Modrinth project |
+| `curseforge-fabric` | the Fabric JAR to CurseForge |
+| `curseforge-neoforge` | the NeoForge JAR to CurseForge |
 
-- Project creation: `POST /project`
-- Version upload: `POST /version`
+Both Modrinth jobs write to one project. The Fabric job finds or creates it. The NeoForge job waits for that job and takes the project id from it. Modrinth ends up with two versions per release, `1.0.0` on the `fabric` loader and `1.0.0-neoforge` on the `neoforge` loader, and the different version numbers keep them apart. Each lists Minecraft `26.2`, which comes from `minecraft_version`.
 
-## Project metadata
+CurseForge gets the slug `accelerated-damage` and the numeric id in the `CURSEFORGE_PROJECT_ID` variable.
 
-The workflow reads:
+## Settings
 
-- `fabric/src/main/resources/fabric.mod.json` for the project slug, title, fallback description, contact links, licence, and side support inference
-- `README.md` for the long project description
-- The GitHub repository description for the Modrinth project summary
-- `.modrinth/project.json` for optional Modrinth-specific overrides
-- `gradle.properties` for `mod_version` and `minecraft_version`
+Everything below lives under the repository's Settings, Secrets and variables, Actions.
 
-Defaults:
+`MODRINTH_TOKEN` is a Modrinth personal access token. `CURSEFORGE_TOKEN` is a CurseForge API token. The GitHub release needs no secret of its own, because GitHub supplies `GITHUB_TOKEN` and the workflow passes it along.
 
-- The Modrinth slug is `fabric.mod.json.id`
-- The project is created as `draft`
-- The GitHub repo URL is used when `fabric.mod.json.contact.sources` is absent
-- The GitHub issues URL is used when `fabric.mod.json.contact.issues` is absent
-- The GitHub wiki URL is used when `fabric.mod.json.contact.wiki` is absent
-- The licence link points at `LICENSE` by default
-- `fabric` is used as the default loader for versions when no override is supplied
-- `utility` is used as the default project category when no override is supplied
-- `discord_url` is always set to `https://discord.gg/N4zfhBx8Fm`
-- The workflow syncs the project summary, long description, `issues_url`, `source_url`, `wiki_url`, and `license_url` on every release so existing Modrinth projects stay aligned with the repository
-- Existing Modrinth project icons are only replaced when the current Modrinth icon URL does not already contain the SHA-1 of the local icon file
+`MODRINTH_PROJECT_ID` is optional and can stay empty. The Fabric job resolves the project from the slug rather than from this variable, creating it as a draft project when nothing is there, and the NeoForge job reuses the id it found. The slug is the `fabric.mod.json` id, `accelerateddamage`, unless `.modrinth/project.json` names another. `CURSEFORGE_PROJECT_ID` is required for CurseForge and holds the numeric project id.
 
-In practice, `.modrinth/project.json` can be kept very small. The template only needs it when you want to override defaults such as:
+## When a step is skipped
 
-- `slug`
-- `categories`
-- `additional_categories`
-- `wiki_url`
-- `license_url`
-- `dependency_overrides`
+Without `MODRINTH_TOKEN` both Modrinth jobs log a notice and stop. The GitHub release still happens. Without `CURSEFORGE_TOKEN` the two CurseForge jobs do the same. A `CURSEFORGE_TOKEN` with an empty `CURSEFORGE_PROJECT_ID` is different: that job fails.
 
-Valid values for `categories` and `additional_categories` are as follows:
+A Modrinth version number that already exists on the project is not uploaded again, because the job lists the project's versions first. A GitHub release that already exists for the tag is edited, and its assets are replaced, rather than created twice.
 
-- `adventure`
-- `cursed`
-- `decoration`
-- `economy`
-- `equipment`
-- `food`
-- `game-mechanics`
-- `library`
-- `magic`
-- `management`
-- `minigame`
-- `mobs`
-- `optimization`
-- `social`
-- `storage`
-- `technology`
-- `transportation`
-- `utility`
-- `worldgen`
+Project and icon synchronization is allowed to fail without stopping the job, but the version upload then fails too. The project id it needs is exported only when synchronization succeeded, so a failed sync leaves the stale project metadata in place and no new version on the project.
 
-`additional_categories` uses the same values as `categories`; the difference is that they are searchable but not shown as primary display categories.
+## Repository visibility
 
-If you do not need any overrides, you can remove `.modrinth/project.json` entirely and the workflow will fall back to defaults.
+The pinned workflow never asks GitHub whether the repository is public. A private repository publishes to Modrinth and CurseForge the same way a public one does. Only the token and project id settings above decide whether a store job runs.
 
-Modrinth categories are separate from loaders. Do not use `fabric` in `categories` or `additional_categories`; keep Fabric in `version.loaders` if you need to override loaders.
+## What the Modrinth project says
 
-## Version dependencies
+The Fabric job refreshes the project on every release. The body is `README.md`. The title, licence and contact links come from `fabric/src/main/resources/fabric.mod.json`, and a link that is missing falls back to the GitHub repository URL. The summary is the GitHub repository description, then `.modrinth/project.json`, then the `fabric.mod.json` description. `.modrinth/project.json` sets the primary category `game-mechanics` and the additional category `utility`, and can also override the slug and the side support. The icon is `common/src/main/resources/assets/accelerateddamage/icon.png`.
 
-Version dependencies are inferred from `fabric/src/main/resources/fabric.mod.json`:
+Version dependencies come from the `depends`, `recommends`, `suggests`, `conflicts` and `breaks` blocks of `fabric.mod.json`, with each mod id read as a Modrinth slug. `minecraft`, `java` and `fabricloader` are dropped, which leaves `fabric-api` as the only one listed. To change one, add a `dependency_overrides` entry to `.modrinth/project.json` with `project_id`, `project_slug` or `dependency_type`, or drop it with `skip`.
 
-- `depends` becomes Modrinth `required`
-- `recommends` and `suggests` become Modrinth `optional`
-- `conflicts` and `breaks` become Modrinth `incompatible`
-- `minecraft`, `java`, and `fabricloader` are ignored
+`fabric.mod.json` sets `environment` to `*` and declares no client entrypoint, so the project is marked server-side only. The NeoForge version lists no dependencies at all, because this repository has no `.modrinth/neoforge-dependencies.json` for the NeoForge job to read.
 
-The workflow first tries the Fabric mod ID as a Modrinth slug, then simple normalisations such as replacing `_` with `-`.
-
-If a dependency uses a different Modrinth slug, add an override in `.modrinth/project.json`:
-
-```json
-{
-  "dependency_overrides": {
-    "some-mod-id": {
-      "project_slug": "some-modrinth-slug"
-    }
-  }
-}
-```
-
-You can also override the dependency type, provide a project ID directly, or skip a dependency entirely:
-
-```json
-{
-  "dependency_overrides": {
-    "some_mod": {
-      "project_id": "AABBCCDD",
-      "dependency_type": "optional"
-    },
-    "local_only_mod": {
-      "skip": true
-    }
-  }
-}
-```
-
-Manual extra version dependencies are still supported with `version.dependencies` if you need to append entries that do not come from `fabric.mod.json`.
-
-## Side support defaults
-
-Side support is inferred from `fabric.mod.json`:
-
-- `environment=client`: `client_side=required`, `server_side=unsupported`
-- `environment=server`: `client_side=unsupported`, `server_side=required`
-- `environment=*` with a client entrypoint: `client_side=required`, `server_side=required`
-- `environment=*` without a client entrypoint: `client_side=unsupported`, `server_side=required`
-
-You can still override the inferred values in `.modrinth/project.json` if needed.
-
-## Release notes
-
-The Modrinth changelog is taken from the same annotated tag notes that are used for the GitHub release body. See [RELEASE.md](RELEASE.md) for more info.
-
-The release workflow fetches the remote tag object before reading notes so annotated tag messages are preserved in GitHub Actions checkouts.
-
-## Notes
-
-- The workflow uploads the Fabric release jar and the NeoForge jar (`<archives_base_name>-neoforge-*.jar`) from `build/libs` and ignores `*-dev.jar` and `*-sources.jar`.
-- If the Modrinth project already exists, it is reused instead of recreated. When a project is newly created, the separate icon sync step is skipped for that release because the create request already uploads the icon.
-- If an existing Modrinth project icon must change and Modrinth rejects the icon replacement, the workflow still publishes the Modrinth version, then fails the job at the end so the stale icon remains visible.
-- If the Modrinth version already exists for the current `mod_version`, publishing is skipped.
-- The Modrinth scripts can also be run locally for validation. When they run outside GitHub Actions, `GITHUB_ENV` is optional and no step output file is written.
+To cut the tag, follow `docs/RELEASE.md`.
