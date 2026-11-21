@@ -141,13 +141,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int COOLDOWN_TICKS = 4;
 
     /// Ticks a cooldown stage holds its picture. At {@link #COOLDOWN_TICK_RATE} ticks a second that
-    /// is six seconds, long enough for the vanilla refill to climb most of the way and for the
-    /// accelerated one to fill twice.
+    /// is six seconds, six refills of the accelerated delay and a fifth of the vanilla one.
     private static final int COOLDOWN_HOLD_TICKS = 30;
 
     /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
-    /// indicator fills between hits with the rule on, and far shorter than the vanilla one.
-    private static final int COOLDOWN_CADENCE_TICKS = 15;
+    /// indicator fills between hits with the rule on, and far shorter than the vanilla one. At
+    /// {@link #COOLDOWN_TICK_RATE} ticks a second a hit lands every second, so the indicator is
+    /// drawn for the whole stage: empty, filling, full, then empty again.
+    private static final int COOLDOWN_CADENCE_TICKS = 5;
 
     /// Ticks a second the game runs at for the two cooldown stages. The accelerated refill is 3.3
     /// ticks, a sixth of a second at the vanilla 20, which a 30 fps capture shows as a flicker; at
@@ -913,7 +914,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
         // The client's own hand must hold the mace before the attack key sends anything.
         context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
-        // A hit every fifteen ticks: the client resets its own attack-strength ticker on the attack
+        // A hit every five ticks: the client resets its own attack-strength ticker on the attack
         // packet, so the indicator empties and refills between hits. With the effect rule off the
         // mace's 33.3-tick delay leaves it crawling; with the rule on the synced 3.3-tick delay
         // fills it before the next hit.
