@@ -155,6 +155,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
     private static final float COOLDOWN_TICK_RATE = 5.0F;
 
+    /// Ticks the title card is on screen: two seconds at the vanilla 20 ticks a second.
+    private static final int TITLE_CARD_TICKS = 40;
+
     /// Ticks the client holds a spear before its own stab gate is read. The accelerated delay is
     /// 2.3 ticks, so the gate accepts the stab well inside this; the vanilla 23-tick delay would
     /// still refuse it.
@@ -857,7 +860,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 "showcase.ready",
                 "Accelerated Damage",
                 "Four rules, every hit and every effect");
-        closeStage(context, "showcase.ready", 20);
+        // The marker pair brackets the hold, so the title card is on screen for it.
+        context.waitTicks(TITLE_CARD_TICKS);
+        closeStage(context, "showcase.ready", 4);
         meleeHalf(context, server, playerId, targetId, false);
         meleeHalf(context, server, playerId, targetId, true);
         cooldownHalf(context, server, playerId, targetId, false);
