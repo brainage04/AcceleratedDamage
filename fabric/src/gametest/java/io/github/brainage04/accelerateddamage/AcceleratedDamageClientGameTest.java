@@ -165,12 +165,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// still refuse it.
     private static final int SPEAR_GATE_TICKS = 8;
 
-    /// Stabs the spear stage films, and the ticks between them. Vanilla's damage cooldown is 20
-    /// ticks, so a stab every 20 ticks lands in full.
-    private static final int SPEAR_STABS = 2;
-
-    private static final int SPEAR_CADENCE_TICKS = 20;
-
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on a
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
@@ -546,7 +540,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 AcceleratedDamageClientGameTest::chest,
                                 slot -> new ItemStack(Items.TRIDENT),
                                 DRAW_CADENCE_TICKS);
-                        recordSpearGate(context, server, playerId);
+                        requireSpearGate(context, server, playerId);
                         recordEffectScene(context, server, playerId, effectsScene());
                         // Aimed at the target's eyes, the throw's lift of 20 degrees above the
                         // view (ThrowablePotionItem.java:26) brings the potion down on its body.
@@ -1160,37 +1154,26 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// charge is short ({@code Minecraft.java:1647} in the 26.3 sources), and a spear's {@code
     /// MINIMUM_ATTACK_CHARGE} is 1.0 ({@code Item.java:552}). The client reads the attack speed the
     /// server synced, so a few ticks after the spear arrives it must accept the stab. With the
-    /// vanilla delay it would refuse for 23 ticks. The stage films the stabs that gate lets through.
-    private static void recordSpearGate(
+    /// vanilla delay it would refuse for 23 ticks.
+    ///
+    /// <p>This is a check, not a stage: a spear's damage type is a bootstrap holder
+    /// ({@code Item.java:527}) and the connection's damage-type registry is the datapack one, so
+    /// the server cannot encode the hurt packet for a spear hit and the client never sees the
+    /// swing land. The stage would film a spear held in the air.
+    private static void requireSpearGate(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         String stage = "showcase.spear";
-        String title = "A spear stabs on the accelerated cooldown";
-        int targetId =
-                server.computeOnServer(
-                        current -> {
-                            current.overworld()
-                                    .getGameRules()
-                                    .set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
-                            ServerPlayer player = player(current, playerId);
-                            player.getInventory().clearContent();
-                            player.getInventory().setItem(0, new ItemStack(Items.NETHERITE_SPEAR));
-                            player.getInventory().setSelectedSlot(0);
-                            player.connection.send(new ClientboundSetHeldSlotPacket(0));
-                            player.resetAttackStrengthTicker();
-                            return placeTarget(
-                                    current, "TridentDummy", MELEE_TARGET, WEAPON_TARGET_HEALTH);
-                        });
-        enterScene(context, server, playerId, MELEE_STAND, chest(server, targetId));
-        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
-        openHitLog(
-                server,
-                stage,
-                playerId,
-                targetId,
+        server.runOnServer(
                 current -> {
-                    setDamageRules(current, false, false);
-                    resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                    current.overworld()
+                            .getGameRules()
+                            .set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
+                    ServerPlayer player = player(current, playerId);
+                    player.getInventory().clearContent();
+                    player.getInventory().setItem(0, new ItemStack(Items.NETHERITE_SPEAR));
+                    player.getInventory().setSelectedSlot(0);
+                    player.connection.send(new ClientboundSetHeldSlotPacket(0));
+                    player.resetAttackStrengthTicker();
                 });
         // The client resets its own attack-strength ticker when the held item changes, so it needs
         // a few ticks after the spear arrives. A spear's vanilla delay is 23 ticks, far more.
@@ -1228,48 +1211,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         + " ticks, delay "
                         + context.computeOnClient(
                                 client -> client.player.getCurrentItemAttackStrengthDelay()));
-        // A stab every 20 ticks. The attack-cooldown rule is off in this stage, so vanilla's
-        // damage cooldown would cut a faster stab short, and the stage is about the client's gate.
-        for (int stab = 1; stab <= SPEAR_STABS; stab++) {
-            ClientGameTestPlayerActions.attackEntity(context, targetId);
-            context.waitTicks(SPEAR_CADENCE_TICKS - 1);
-            showHealth(context, server, targetId, stage, title, "stab " + stab);
-        }
-        // The last stab's damage lands on the tick after the press, so the caption is pushed again
-        // before the hold.
-        context.waitTicks(2);
-        showHealth(context, server, targetId, stage, title, "stab " + SPEAR_STABS);
-        HitLog log =
-                server.computeOnServer(
-                        current -> {
-                            HitLog closing = hitLog;
-                            hitLog = null;
-                            closing.close(
-                                    serverTick, living(current, closing.targetId).getHealth());
-                            return closing;
-                        });
-        System.out.println(log.describe());
-        context.waitTicks(Math.max(0, HALF_TICKS - (log.closeTick - log.openTick)));
-        closeStage(context, stage, 4);
-        if (log.inputTicks.size() != SPEAR_STABS) {
-            throw new AssertionError(
-                    "Expected "
-                            + SPEAR_STABS
-                            + " spear stabs in "
-                            + stage
-                            + ", the server saw "
-                            + log.inputTicks.size()
-                            + ": "
-                            + log.describe());
-        }
-        assertEveryHitLands(log);
         server.runOnServer(
                 current -> {
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
                     player(current, playerId).getInventory().clearContent();
-                    parkTarget(current, targetId);
                 });
     }
 
