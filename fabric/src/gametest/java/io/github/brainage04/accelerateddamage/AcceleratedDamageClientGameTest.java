@@ -152,25 +152,33 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int COOLDOWN_CADENCE_TICKS = 5;
 
     /// Ticks a second the game runs at for the two cooldown stages. The accelerated refill is 3.3
-    /// ticks, a sixth of a second at the vanilla 20, which a 30 fps capture shows as a flicker; at
+    /// ticks, a sixth of a second at the vanilla 20, which a 30 fps capture shows as a flicker. At
     /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
     private static final float COOLDOWN_TICK_RATE = 5.0F;
 
-    /// Ticks the title card is on screen: two seconds at the vanilla 20 ticks a second.
+    /// Ticks the title card is on screen: two seconds at the 20 ticks a second the test has set at
+    /// that point ({@code TickRateManager.java:9} is the default).
     private static final int TITLE_CARD_TICKS = 40;
 
     /// Ticks the client holds a spear before its own stab gate is read. The accelerated delay is
-    /// 2.3 ticks, so the gate accepts the stab well inside this; the vanilla 23-tick delay would
+    /// 2.3 ticks, so the gate accepts the stab well inside this. The vanilla 23-tick delay would
     /// still refuse it.
     private static final int SPEAR_GATE_TICKS = 8;
+
+    /// Stabs the spear stage films, and the ticks between them. Vanilla's damage cooldown is 20
+    /// ticks, so a stab every 20 ticks lands in full.
+    private static final int SPEAR_STABS = 2;
+
+    private static final int SPEAR_CADENCE_TICKS = 20;
 
     /// How many ticks the caption's health numbers may lag the server's: a number that changes on a
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
 
-    /// How far a client's effect duration may sit from the server's: the server burns ten durations
-    /// a tick and resends every ten ticks, so a client that received the last resend holds a
-    /// duration up to ten ticks behind, and one that missed it is hundreds ahead.
+    /// How far a client's effect duration may sit from the server's. The server burns ten
+    /// durations a tick and resends every ten ticks, so the client is set to the server's value on
+    /// each resend and drifts up to 90 ticks ahead before the next one. The read is taken one tick
+    /// after a resend, when the client has just applied it.
     private static final int EFFECT_SYNC_TOLERANCE_TICKS = 20;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
@@ -894,7 +902,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     ///
     /// <p>The game runs at {@link #COOLDOWN_TICK_RATE} ticks a second for both halves. The
     /// accelerated refill is 3.3 ticks, a sixth of a second at the vanilla 20, which a 30 fps
-    /// capture shows as a flicker; at 5 ticks a second it lasts two thirds of a second and the
+    /// capture shows as a flicker. At 5 ticks a second it lasts two thirds of a second and the
     /// vanilla one 6.7 seconds, so both are refills a viewer can follow.
     private static void cooldownHalf(
             ClientGameTestContext context,
@@ -936,7 +944,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         current -> entity(current, targetId).position().add(0.0, 0.2, 0.0)));
         // A hit every five ticks: the client resets its own attack-strength ticker on the attack
         // packet, so the indicator empties and refills between hits. With the effect rule off the
-        // mace's 33.3-tick delay leaves it crawling; with the rule on the synced 3.3-tick delay
+        // mace's 33.3-tick delay leaves it crawling. With the rule on the synced 3.3-tick delay
         // fills it before the next hit.
         float charge = -1.0F;
         float delay = -1.0F;
@@ -1151,30 +1159,41 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Minecraft#startAttack} refuses the swing while {@code Player#cannotAttackWithItem} says the
     /// charge is short ({@code Minecraft.java:1647} in the 26.3 sources), and a spear's {@code
     /// MINIMUM_ATTACK_CHARGE} is 1.0 ({@code Item.java:552}). The client reads the attack speed the
-    /// server synced, so a few ticks after the spear arrives it must accept the stab; with the
-    /// vanilla delay it would refuse for 23 ticks.
+    /// server synced, so a few ticks after the spear arrives it must accept the stab. With the
+    /// vanilla delay it would refuse for 23 ticks. The stage films the stabs that gate lets through.
     private static void recordSpearGate(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         String stage = "showcase.spear";
-        openStage(
-                context,
+        String title = "A spear stabs on the accelerated cooldown";
+        int targetId =
+                server.computeOnServer(
+                        current -> {
+                            current.overworld()
+                                    .getGameRules()
+                                    .set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
+                            ServerPlayer player = player(current, playerId);
+                            player.getInventory().clearContent();
+                            player.getInventory().setItem(0, new ItemStack(Items.NETHERITE_SPEAR));
+                            player.getInventory().setSelectedSlot(0);
+                            player.connection.send(new ClientboundSetHeldSlotPacket(0));
+                            player.resetAttackStrengthTicker();
+                            return placeTarget(
+                                    current, "TridentDummy", MELEE_TARGET, WEAPON_TARGET_HEALTH);
+                        });
+        enterScene(context, server, playerId, MELEE_STAND, chest(server, targetId));
+        ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+        openHitLog(
+                server,
                 stage,
-                "A spear stabs on the accelerated cooldown",
-                "the vanilla client's own attack gate accepts the stab");
-        server.runOnServer(
+                playerId,
+                targetId,
                 current -> {
-                    current.overworld()
-                            .getGameRules()
-                            .set(ModGameRules.FASTER_EFFECT_TICKING, true, current);
-                    ServerPlayer player = player(current, playerId);
-                    player.getInventory().clearContent();
-                    player.getInventory().setItem(0, new ItemStack(Items.NETHERITE_SPEAR));
-                    player.getInventory().setSelectedSlot(0);
-                    player.connection.send(new ClientboundSetHeldSlotPacket(0));
-                    player.resetAttackStrengthTicker();
+                    setDamageRules(current, false, false);
+                    resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
                 });
         // The client resets its own attack-strength ticker when the held item changes, so it needs
-        // a few ticks after the spear arrives; a spear's vanilla delay is 23 ticks, far more.
+        // a few ticks after the spear arrives. A spear's vanilla delay is 23 ticks, far more.
         context.waitTicks(SPEAR_GATE_TICKS);
         String violation =
                 context.computeOnClient(
@@ -1209,14 +1228,48 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         + " ticks, delay "
                         + context.computeOnClient(
                                 client -> client.player.getCurrentItemAttackStrengthDelay()));
-        context.waitTicks(HALF_TICKS - SPEAR_GATE_TICKS);
+        // A stab every 20 ticks. The attack-cooldown rule is off in this stage, so vanilla's
+        // damage cooldown would cut a faster stab short, and the stage is about the client's gate.
+        for (int stab = 1; stab <= SPEAR_STABS; stab++) {
+            ClientGameTestPlayerActions.attackEntity(context, targetId);
+            context.waitTicks(SPEAR_CADENCE_TICKS - 1);
+            showHealth(context, server, targetId, stage, title, "stab " + stab);
+        }
+        // The last stab's damage lands on the tick after the press, so the caption is pushed again
+        // before the hold.
+        context.waitTicks(2);
+        showHealth(context, server, targetId, stage, title, "stab " + SPEAR_STABS);
+        HitLog log =
+                server.computeOnServer(
+                        current -> {
+                            HitLog closing = hitLog;
+                            hitLog = null;
+                            closing.close(
+                                    serverTick, living(current, closing.targetId).getHealth());
+                            return closing;
+                        });
+        System.out.println(log.describe());
+        context.waitTicks(Math.max(0, HALF_TICKS - (log.closeTick - log.openTick)));
         closeStage(context, stage, 4);
+        if (log.inputTicks.size() != SPEAR_STABS) {
+            throw new AssertionError(
+                    "Expected "
+                            + SPEAR_STABS
+                            + " spear stabs in "
+                            + stage
+                            + ", the server saw "
+                            + log.inputTicks.size()
+                            + ": "
+                            + log.describe());
+        }
+        assertEveryHitLands(log);
         server.runOnServer(
                 current -> {
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
                     player(current, playerId).getInventory().clearContent();
+                    parkTarget(current, targetId);
                 });
     }
 
@@ -1623,11 +1676,19 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     // The recording player's own effect is what the client can be
                                     // compared against: EffectSyncTicker resends an effect to its
                                     // holder's connection, and the only connection a real client
-                                    // holds is its own player's.
+                                    // holds is its own player's. Water breathing carries no
+                                    // attribute modifier (MobEffects.java:57), so it leaves the
+                                    // field of view alone, and the icon is off so the HUD is
+                                    // unchanged.
                                     player(current, playerId)
                                             .addEffect(
                                                     new MobEffectInstance(
-                                                            MobEffects.SPEED, REGENERATION_TICKS));
+                                                            MobEffects.WATER_BREATHING,
+                                                            REGENERATION_TICKS,
+                                                            0,
+                                                            false,
+                                                            false,
+                                                            false));
                                 }
                                 for (Map.Entry<String, Optional<Holder<MobEffect>>> healer :
                                         scene.healers().entrySet()) {
@@ -1750,10 +1811,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server.computeOnServer(
                         current -> {
                             MobEffectInstance effect =
-                                    player(current, playerId).getEffect(MobEffects.SPEED);
+                                    player(current, playerId).getEffect(MobEffects.WATER_BREATHING);
                             if (effect == null) {
                                 throw new AssertionError(
-                                        "Expected the recording player to hold the speed effect in "
+                                        "Expected the recording player to hold the water breathing effect in "
                                                 + stage);
                             }
                             return effect.getDuration();
@@ -1761,10 +1822,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int clientDuration =
                 context.computeOnClient(
                         client -> {
-                            MobEffectInstance effect = client.player.getEffect(MobEffects.SPEED);
+                            MobEffectInstance effect = client.player.getEffect(MobEffects.WATER_BREATHING);
                             if (effect == null) {
                                 throw new AssertionError(
-                                        "Expected the vanilla client to receive the speed effect in "
+                                        "Expected the vanilla client to receive the water breathing effect in "
                                                 + stage);
                             }
                             return effect.getDuration();
@@ -2373,7 +2434,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         if (!server.getPlayerList().getPlayers().isEmpty()) {
             ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
-            player.removeEffect(MobEffects.SPEED);
+            player.removeEffect(MobEffects.WATER_BREATHING);
             player.setAirSupply(player.getMaxAirSupply());
             player.getInventory().clearContent();
         }
