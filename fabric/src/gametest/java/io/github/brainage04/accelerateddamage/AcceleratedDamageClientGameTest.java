@@ -728,8 +728,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (entity == client.player) {
                 continue;
             }
+            // The frame drawn right after a tick uses a partial tick near 0, so the box the
+            // renderer draws is the one lerped from the old position, not the current one.
             double covered =
-                    screenCoverage(viewProjection, eye, entity.getInterpolatedBoundingBox(1.0F));
+                    screenCoverage(viewProjection, eye, entity.getInterpolatedBoundingBox(0.0F));
             if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
                 WORST_FRAME =
                         String.format(
