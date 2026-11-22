@@ -615,12 +615,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // The start of the client tick, before the level ticks its entities: a projectile spawned
         // by a packet is still at the camera here, and the frame this tick draws is the one that
         // would show it across the lens.
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
-                .register(
-                        client -> {
-                            clearProjectilesFromTheLens(client);
-                            recordFrameCoverage(client);
-                        });
+        // The end of the client tick: the tick's packets have been applied, so a projectile a shot
+        // has just spawned is at the camera here, and the frame this tick draws is the one that
+        // would show it across the lens.
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
+                client -> {
+                    clearProjectilesFromTheLens(client);
+                    recordFrameCoverage(client);
+                });
         AttackEntityCallback.EVENT.register(
                 (player, level, hand, entity, hitResult) -> {
                     HitLog log = hitLog;
@@ -677,7 +679,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (motion.lengthSqr() < 1.0E-4) {
                 continue;
             }
-            projectile.setPos(camera.add(motion.normalize().scale(1.5)));
+            // One tick of travel is where the server's arrow already is: the add-entity packet
+            // carries the spawn position and the move packet that follows carries this one, so
+            // applying it a tick early is the position the client is about to be told anyway.
+            projectile.setPos(camera.add(motion));
         }
     }
 
