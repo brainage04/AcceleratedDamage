@@ -634,6 +634,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // The end of the client tick: the tick's packets have been applied, so a projectile a shot
         // has just spawned is at the camera here, and the frame this tick draws is the one that
         // would show it across the lens.
+        // Both ends of the client tick: a projectile's add-entity packet is applied before the
+        // tick starts, so a shot fired on the previous tick is at the camera at the start of this
+        // one, and the frame is drawn after the tick ends.
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK.register(
+                AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 client -> {
                     snapProjectilesOffTheCamera(client);
@@ -809,8 +814,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (inFront == 0) {
             return 0.0;
         }
-        if (inFront < 8) {
+        if (box.contains(eye)) {
+            // The camera is inside the body: the frame is the inside of its model.
             return 1.0;
+        }
+        if (inFront < 8) {
+            // Part of the box is behind the camera but the camera is not inside it, so the body is
+            // beside the lens, not across it. Only the corners in front are drawn.
+            return 0.0;
         }
         double width = Math.min(1.0, maxX) - Math.max(-1.0, minX);
         double height = Math.min(1.0, maxY) - Math.max(-1.0, minY);
