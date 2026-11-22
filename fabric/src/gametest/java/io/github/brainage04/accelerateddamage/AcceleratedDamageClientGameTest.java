@@ -656,6 +656,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 heals.healed += target.getHealth() - before;
             }
             if (tracked.anchor() != null) {
+                // A pinned target takes no knockback at all: a hit that moved it and was snapped
+                // back in the same tick still reaches the client as two positions, and the client
+                // interpolates the target through the camera between them.
+                target.setDeltaMovement(Vec3.ZERO);
                 target.setPos(tracked.anchor().x, tracked.anchor().y, tracked.anchor().z);
             }
             target.setCustomName(
