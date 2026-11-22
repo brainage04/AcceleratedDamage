@@ -485,19 +485,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                         });
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
                         // The film is cut to its stage markers, so the first marker has to be the
-                        // first frame worth showing: the world is drawn and settled before the
-                        // title card goes up, and the join and the loading wall stay outside it.
+                        // first frame worth showing. The tour that loads every viewpoint runs
+                        // before any marker, and the title card goes up on the melee scene, which
+                        // is the first thing the film shows.
                         ClientGameTestWaits.waitForChunkWindow(context, 4, 200);
                         ClientGameTestWaits.waitForRenderSettled(context, 4, 200);
-                        // The title card covers the tour that loads every viewpoint, so the first
-                        // scenario never opens on an unloaded chunk.
-                        openStage(
-                                context,
-                                "showcase.ready",
-                                "Accelerated Damage",
-                                "Four rules, every hit and every effect");
                         preloadArena(context, server, playerId);
-                        closeStage(context, "showcase.ready", 10);
 
                         recordMelee(context, server, playerId);
                         recordBow(context, server, playerId);
@@ -859,6 +852,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // sits near the middle of the frame instead of under the caption panel.
         Vec3 neck = chest(server, targetId).add(0.0, 0.45, 0.0);
         enterScene(context, server, playerId, MELEE_STAND, neck);
+        openStage(
+                context,
+                "showcase.ready",
+                "Accelerated Damage",
+                "Four rules, every hit and every effect");
+        closeStage(context, "showcase.ready", 20);
         meleeHalf(context, server, playerId, targetId, false);
         meleeHalf(context, server, playerId, targetId, true);
         cooldownHalf(context, server, playerId, targetId, false);
