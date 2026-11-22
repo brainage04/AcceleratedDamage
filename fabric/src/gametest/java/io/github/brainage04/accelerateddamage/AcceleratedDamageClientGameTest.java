@@ -620,7 +620,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // would show it across the lens.
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 client -> {
-                    clearProjectilesFromTheLens(client);
+                    hideProjectilesAtTheCamera(client);
                     recordFrameCoverage(client);
                 });
         AttackEntityCallback.EVENT.register(
@@ -655,15 +655,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-    /// Moves a projectile that a shot has just spawned at the camera out of the lens.
+    /// Hides a projectile that a shot has just spawned at the camera.
     ///
     /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
     /// the 26.3 sources), and in first person the camera sits at that eye, so the arrow's own box
-    /// contains the camera and its one-block model is drawn across the near plane: the frame is a
-    /// wall of its texture for the first frames of every shot. The server's arrow is where vanilla
-    /// put it; only the client's copy is moved, forward along the motion the server already gave
-    /// it, so the next position packet agrees with what is drawn.
-    private static void clearProjectilesFromTheLens(Minecraft client) {
+    /// contains the camera and its model is drawn across the near plane: the frame is a wall of its
+    /// texture for the first frames of every shot. Moving the client's copy does not help, because
+    /// the server's next position packet puts it back; hiding it does, and the server's arrow is
+    /// untouched. The flag is cleared as soon as the arrow leaves the camera, so the flight is
+    /// drawn as usual.
+    private static void hideProjectilesAtTheCamera(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
         }
@@ -672,17 +673,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!(entity instanceof Projectile projectile) || entity == client.player) {
                 continue;
             }
-            if (!projectile.getBoundingBox().contains(camera)) {
-                continue;
-            }
-            Vec3 motion = projectile.getDeltaMovement();
-            if (motion.lengthSqr() < 1.0E-4) {
-                continue;
-            }
-            // One tick of travel is where the server's arrow already is: the add-entity packet
-            // carries the spawn position and the move packet that follows carries this one, so
-            // applying it a tick early is the position the client is about to be told anyway.
-            projectile.setPos(camera.add(motion));
+            projectile.setInvisible(projectile.getBoundingBox().contains(camera));
         }
     }
 
@@ -691,9 +682,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the start of
     /// every client tick, through the camera's own view and projection matrices. A box with a
     /// corner behind the camera covers the whole screen, because part of it is drawn across the
-    /// near plane. The measurement runs after {@link #clearProjectilesFromTheLens} in the same
-    /// tick, so it sees the frame that tick draws. The check runs at every stage marker and after
-    /// every shot, so a body across the lens fails the run instead of reaching the film.
+    /// near plane. The measurement runs after {@link #hideProjectilesAtTheCamera} in the same tick,
+    /// so it sees the frame that tick draws. The check runs at every stage marker and after every
+    /// shot, so a body across the lens fails the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
         String violation = WORST_FRAME;
         WORST_FRAME = null;
