@@ -918,6 +918,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
         // The client's own hand must hold the mace before the attack key sends anything.
         context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
+        // The indicator is drawn nine GUI pixels below the crosshair (Hud.java:448-465), so aiming
+        // at the neck puts it on the dummy's chest, where the red hurt flash hides it. Aiming at
+        // the shins keeps the crosshair inside the hitbox and puts the bar on the floor below it.
+        ClientGameTestPlayerActions.lookAt(
+                context,
+                server.computeOnServer(
+                        current -> entity(current, targetId).position().add(0.0, 0.2, 0.0)));
         // A hit every five ticks: the client resets its own attack-strength ticker on the attack
         // packet, so the indicator empties and refills between hits. With the effect rule off the
         // mace's 33.3-tick delay leaves it crawling; with the rule on the synced 3.3-tick delay
