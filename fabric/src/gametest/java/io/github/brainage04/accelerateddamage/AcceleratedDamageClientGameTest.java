@@ -83,6 +83,7 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector4f;
 
 /// The showcase the owner asked for: every rule, filmed against player-shaped targets with the
@@ -620,7 +621,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // would show it across the lens.
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 client -> {
-                    hideProjectilesAtTheCamera(client);
+                    snapProjectilesOffTheCamera(client);
                     recordFrameCoverage(client);
                 });
         AttackEntityCallback.EVENT.register(
@@ -655,25 +656,28 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-    /// Hides a projectile that a shot has just spawned at the camera.
+    /// Snaps a projectile's old position forward when it is still at the camera.
     ///
     /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
-    /// the 26.3 sources), and in first person the camera sits at that eye, so the arrow's own box
-    /// contains the camera and its model is drawn across the near plane: the frame is a wall of its
-    /// texture for the first frames of every shot. Moving the client's copy does not help, because
-    /// the server's next position packet puts it back; hiding it does, and the server's arrow is
-    /// untouched. The flag is cleared as soon as the arrow leaves the camera, so the flight is
-    /// drawn as usual.
-    private static void hideProjectilesAtTheCamera(Minecraft client) {
+    /// the 26.3 sources), and in first person the camera sits at that eye. The renderer draws an
+    /// entity at the position lerped from its old position to its current one
+    /// ({@code EntityRenderer.java:163-165}), and the old position is the spawn point until the
+    /// entity's first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the first frame
+    /// of every shot draws the arrow across the near plane: a wall of its texture. The server's
+    /// arrow is untouched; only the client's copy has its old position moved, so the lerp starts
+    /// where the arrow already is.
+    private static void snapProjectilesOffTheCamera(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
         }
-        Vec3 camera = client.gameRenderer.mainCamera().position();
+        Vec3 eye = client.player.getEyePosition();
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof Projectile projectile) || entity == client.player) {
                 continue;
             }
-            projectile.setInvisible(projectile.getBoundingBox().contains(camera));
+            if (projectile.oldPosition().distanceTo(eye) < 1.0) {
+                projectile.setOldPosAndRot();
+            }
         }
     }
 
@@ -682,7 +686,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the start of
     /// every client tick, through the camera's own view and projection matrices. A box with a
     /// corner behind the camera covers the whole screen, because part of it is drawn across the
-    /// near plane. The measurement runs after {@link #hideProjectilesAtTheCamera} in the same tick,
+    /// near plane. The measurement runs after {@link #snapProjectilesOffTheCamera} in the same tick,
     /// so it sees the frame that tick draws. The check runs at every stage marker and after every
     /// shot, so a body across the lens fails the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
@@ -700,14 +704,32 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (client.level == null || client.player == null) {
             return;
         }
+        // Camera.update only runs in the render pass (Camera.java:88-108 in the 26.3 sources), so
+        // at the end of a client tick the camera still holds the previous frame's position and
+        // rotation. The eye and the rotation the next frame will use are the player's own, so the
+        // projection is taken from the camera and the view rotation is rebuilt from the player.
         Camera camera = client.gameRenderer.mainCamera();
-        Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
-        Vec3 eye = camera.position();
+        Matrix4f projection =
+                new Matrix4f(camera.getViewRotationProjectionMatrix(new Matrix4f()))
+                        .mul(camera.getViewRotationMatrix(new Matrix4f()).invert());
+        Quaternionf rotation =
+                new Quaternionf()
+                        .rotationYXZ(
+                                (float) Math.PI
+                                        - client.player.getViewYRot(1.0F)
+                                                * (float) (Math.PI / 180.0),
+                                -client.player.getViewXRot(1.0F) * (float) (Math.PI / 180.0),
+                                0.0F);
+        Matrix4f viewProjection =
+                new Matrix4f(projection)
+                        .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
+        Vec3 eye = client.player.getEyePosition();
         for (Entity entity : client.level.entitiesForRendering()) {
             if (entity == client.player) {
                 continue;
             }
-            double covered = screenCoverage(viewProjection, eye, entity.getBoundingBox());
+            double covered =
+                    screenCoverage(viewProjection, eye, entity.getInterpolatedBoundingBox(1.0F));
             if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
                 WORST_FRAME =
                         String.format(
