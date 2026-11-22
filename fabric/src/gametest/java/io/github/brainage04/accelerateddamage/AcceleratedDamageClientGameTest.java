@@ -116,6 +116,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// covered more than {@link #MAX_ENTITY_SCREEN_COVERAGE}.
     private static volatile String WORST_FRAME;
 
+    /// The caption the current half pushed last, for {@link #requireLastCaptionShown}.
+    private static volatile LastCaption LAST_CAPTION;
+
     private static final int ARENA_Y = 64;
     private static final double RANGE_X = -6.5D;
     private static final Vec3 MELEE_STAND = new Vec3(0.5, ARENA_Y, 1.5);
@@ -219,6 +222,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// A filmed half lasts about two seconds.
     private static final int HALF_TICKS = 40;
+
+    /// Ticks the last caption of a half stays on screen before its end marker. The cut keeps a
+    /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the
+    /// bow half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
+    private static final int MIN_LAST_CAPTION_TICKS = 4;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
     /// placed in a scene is a new entity on the client, its body built facing the rotation sent
@@ -368,6 +376,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         private final List<Integer> inputTicks = new ArrayList<>();
         private final List<Hit> hits = new ArrayList<>();
         private int closeTick;
+        private float finalHealth;
 
         private HitLog(String stage, int playerId, int targetId, int openTick) {
             this.stage = stage;
@@ -384,6 +393,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         private void close(int tick, float health) {
             finishLastHit(health);
             closeTick = tick;
+            finalHealth = health;
+        }
+
+        /// The target's health when the half closed, which is what its last caption must show.
+        private float finalHealth() {
+            return finalHealth;
         }
 
         private void finishLastHit(float health) {
@@ -1429,7 +1444,50 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float health = server.computeOnServer(current -> living(current, targetId).getHealth());
         ClientGameTestRecorder.showStep(
                 context, stage, title, label + ", health " + health(health));
+        LAST_CAPTION = new LastCaption(label, health, server.computeOnServer(_ -> serverTick));
         requireNoEntityFillsTheFrame(stage);
+    }
+
+    /// The caption a half pushed last, and the tick it pushed it on.
+    private record LastCaption(String label, float health, int tick) {}
+
+    /// Fails unless the half's last caption is the last hit's health and was on screen long enough
+    /// to be drawn. The cut keeps a stage up to its end marker, so a caption pushed on the marker's
+    /// own tick never reaches the film: the bow half's 14 shots at 3 ticks run 42 ticks, past
+    /// {@link #HALF_TICKS}, and its last caption was cut from the take.
+    private static void requireLastCaptionShown(String stage, String lastLabel, HitLog log) {
+        LastCaption caption = LAST_CAPTION;
+        if (caption == null) {
+            throw new AssertionError("Expected " + stage + " to push a caption");
+        }
+        if (!caption.label().equals(lastLabel)) {
+            throw new AssertionError(
+                    "Expected the last caption of "
+                            + stage
+                            + " to be "
+                            + lastLabel
+                            + ", it was "
+                            + caption.label());
+        }
+        if (Math.abs(caption.health() - log.finalHealth()) > 0.05F) {
+            throw new AssertionError(
+                    "Expected the last caption of "
+                            + stage
+                            + " to show the last hit's health "
+                            + log.finalHealth()
+                            + ", it showed "
+                            + caption.health());
+        }
+        int shown = serverTick - caption.tick();
+        if (shown < MIN_LAST_CAPTION_TICKS) {
+            throw new AssertionError(
+                    "Expected the last caption of "
+                            + stage
+                            + " to stay on screen for "
+                            + MIN_LAST_CAPTION_TICKS
+                            + " ticks before its end marker, it had "
+                            + shown);
+        }
     }
 
     /// Waits until every projectile of the half has reached the target, pushing the caption on
@@ -1482,8 +1540,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         System.out.println(log.describe());
         // The cut keeps a stage up to its end marker, so the half holds its last picture before
-        // the marker until it has run about two seconds.
-        context.waitTicks(Math.max(0, HALF_TICKS - (log.closeTick - log.openTick)));
+        // the marker until it has run about two seconds, and never less than the last caption
+        // needs to be drawn.
+        context.waitTicks(
+                Math.max(
+                        MIN_LAST_CAPTION_TICKS,
+                        HALF_TICKS - (log.closeTick - log.openTick)));
+        requireLastCaptionShown(stage, lastLabel, log);
         closeStage(context, stage, 4);
         assertCadence(log, expectedInputs);
         if (rulesOn) {
