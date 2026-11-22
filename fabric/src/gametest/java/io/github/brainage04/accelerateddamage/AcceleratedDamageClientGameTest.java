@@ -33,6 +33,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
@@ -75,11 +76,14 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
 
 /// The showcase the owner asked for: every rule, filmed against player-shaped targets with the
 /// target's health printed in the caption after every hit, so a hit landing is visible.
@@ -103,6 +107,14 @@ import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 /// scene carries the view, and nothing turns the camera inside a scenario.
 @SuppressWarnings("UnstableApiUsage")
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
+    /// The most of the frame one entity may cover. A player-shaped target four blocks from the
+    /// camera covers about a fifth of it; a body across the lens covers all of it.
+    private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.5;
+
+    /// The worst entity coverage recorded since the last frame check, or null when no entity
+    /// covered more than {@link #MAX_ENTITY_SCREEN_COVERAGE}.
+    private static volatile String WORST_FRAME;
+
     private static final int ARENA_Y = 64;
     private static final double RANGE_X = -6.5D;
     private static final Vec3 MELEE_STAND = new Vec3(0.5, ARENA_Y, 1.5);
@@ -169,10 +181,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
 
-    /// How far a client's effect duration may sit from the server's. The server burns ten
-    /// durations a tick and resends every ten ticks, so the client is set to the server's value on
-    /// each resend and drifts up to 90 ticks ahead before the next one. The read is taken one tick
-    /// after a resend, when the client has just applied it.
+    /// How far a client's effect duration may sit from the server's. The server burns ten durations
+    /// a tick and resends every ten ticks, so the client is set to the server's value on each
+    /// resend and drifts up to 90 ticks ahead before the next one. The read is taken one tick after
+    /// a resend, when the client has just applied it.
     private static final int EFFECT_SYNC_TOLERANCE_TICKS = 20;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
@@ -600,6 +612,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
+        // The start of the client tick, before the level ticks its entities: a projectile spawned
+        // by a packet is still at the camera here, and the frame this tick draws is the one that
+        // would show it across the lens.
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
+                .register(
+                        client -> {
+                            clearProjectilesFromTheLens(client);
+                            recordFrameCoverage(client);
+                        });
         AttackEntityCallback.EVENT.register(
                 (player, level, hand, entity, hitResult) -> {
                     HitLog log = hitLog;
@@ -630,6 +651,126 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     return true;
                 });
         listenersRegistered = true;
+    }
+
+    /// Moves a projectile that a shot has just spawned at the camera out of the lens.
+    ///
+    /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
+    /// the 26.3 sources), and in first person the camera sits at that eye, so the arrow's own box
+    /// contains the camera and its one-block model is drawn across the near plane: the frame is a
+    /// wall of its texture for the first frames of every shot. The server's arrow is where vanilla
+    /// put it; only the client's copy is moved, forward along the motion the server already gave
+    /// it, so the next position packet agrees with what is drawn.
+    private static void clearProjectilesFromTheLens(Minecraft client) {
+        if (client.level == null || client.player == null) {
+            return;
+        }
+        Vec3 camera = client.gameRenderer.mainCamera().position();
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (!(entity instanceof Projectile projectile) || entity == client.player) {
+                continue;
+            }
+            if (!projectile.getBoundingBox().contains(camera)) {
+                continue;
+            }
+            Vec3 motion = projectile.getDeltaMovement();
+            if (motion.lengthSqr() < 1.0E-4) {
+                continue;
+            }
+            projectile.setPos(camera.add(motion.normalize().scale(1.5)));
+        }
+    }
+
+    /// Fails a stage whose frame an entity fills more than half of.
+    ///
+    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the start of
+    /// every client tick, through the camera's own view and projection matrices. A box with a
+    /// corner behind the camera covers the whole screen, because part of it is drawn across the
+    /// near plane. The measurement runs after {@link #clearProjectilesFromTheLens} in the same
+    /// tick, so it sees the frame that tick draws. The check runs at every stage marker and after
+    /// every shot, so a body across the lens fails the run instead of reaching the film.
+    private static void requireNoEntityFillsTheFrame(String stage) {
+        String violation = WORST_FRAME;
+        WORST_FRAME = null;
+        if (violation != null) {
+            throw new AssertionError(
+                    "Expected no entity to fill the frame in " + stage + ": " + violation);
+        }
+    }
+
+    /// Records the worst entity coverage of the frame this tick draws, for {@link
+    /// #requireNoEntityFillsTheFrame}.
+    private static void recordFrameCoverage(Minecraft client) {
+        if (client.level == null || client.player == null) {
+            return;
+        }
+        Camera camera = client.gameRenderer.mainCamera();
+        Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
+        Vec3 eye = camera.position();
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (entity == client.player) {
+                continue;
+            }
+            double covered = screenCoverage(viewProjection, eye, entity.getBoundingBox());
+            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
+                WORST_FRAME =
+                        String.format(
+                                Locale.ROOT,
+                                "%s at %s covers %.0f%% of the frame from the camera at %s",
+                                entity.getType(),
+                                entity.position(),
+                                covered * 100.0,
+                                eye);
+                return;
+            }
+        }
+    }
+
+    /// The fraction of the screen a box covers, from its eight corners projected through the
+    /// camera. A box entirely behind the camera covers nothing; one that straddles the camera's
+    /// plane covers the whole screen, because part of it is drawn across the near plane.
+    private static double screenCoverage(Matrix4f viewProjection, Vec3 eye, AABB box) {
+        double minX = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        int inFront = 0;
+        for (int corner = 0; corner < 8; corner++) {
+            Vec3 point =
+                    new Vec3(
+                            (corner & 1) == 0 ? box.minX : box.maxX,
+                            (corner & 2) == 0 ? box.minY : box.maxY,
+                            (corner & 4) == 0 ? box.minZ : box.maxZ);
+            Vector4f projected =
+                    viewProjection.transform(
+                            new Vector4f(
+                                    (float) (point.x - eye.x),
+                                    (float) (point.y - eye.y),
+                                    (float) (point.z - eye.z),
+                                    1.0F));
+            if (projected.w <= 0.0F) {
+                continue;
+            }
+            inFront++;
+            double x = projected.x / projected.w;
+            double y = projected.y / projected.w;
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+        if (inFront == 0) {
+            return 0.0;
+        }
+        if (inFront < 8) {
+            return 1.0;
+        }
+        double width = Math.min(1.0, maxX) - Math.max(-1.0, minX);
+        double height = Math.min(1.0, maxY) - Math.max(-1.0, minY);
+        if (width <= 0.0 || height <= 0.0) {
+            return 0.0;
+        }
+        return width * height / 4.0;
     }
 
     /// Runs the half of a player's tick that a real client's connection runs for it.
@@ -808,6 +949,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestCommands.clearChat(context);
         ClientGameTestStages.markStage(id);
         ClientGameTestRecorder.showStep(context, id, title, subtitle);
+        requireNoEntityFillsTheFrame(id);
     }
 
     private static void closeStage(ClientGameTestContext context, String id, int holdTicks) {
@@ -1156,10 +1298,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// server synced, so a few ticks after the spear arrives it must accept the stab. With the
     /// vanilla delay it would refuse for 23 ticks.
     ///
-    /// <p>This is a check, not a stage: a spear's damage type is a bootstrap holder
-    /// ({@code Item.java:527}) and the connection's damage-type registry is the datapack one, so
-    /// the server cannot encode the hurt packet for a spear hit and the client never sees the
-    /// swing land. The stage would film a spear held in the air.
+    /// <p>This is a check, not a stage: a spear's damage type is a bootstrap holder ({@code
+    /// Item.java:527}) and the connection's damage-type registry is the datapack one, so the server
+    /// cannot encode the hurt packet for a spear hit and the client never sees the swing land. The
+    /// stage would film a spear held in the air.
     private static void requireSpearGate(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         String stage = "showcase.spear";
@@ -1267,6 +1409,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float health = server.computeOnServer(current -> living(current, targetId).getHealth());
         ClientGameTestRecorder.showStep(
                 context, stage, title, label + ", health " + health(health));
+        requireNoEntityFillsTheFrame(stage);
     }
 
     /// Waits until every projectile of the half has reached the target, pushing the caption on
@@ -1740,12 +1883,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         assertEffectsAccelerated(scene, change);
     }
 
-    /// Fails unless the vanilla client holds the same effect duration the server does for the
-    /// recording player. The server burns ten durations a tick with the rule on ({@code
-    /// MobEffectInstanceMixin}), and {@code EffectSyncTicker} resends every effect to its own
-    /// holder's connection every ten ticks, so a client that never received those packets would
-    /// still show the vanilla duration, hundreds of ticks ahead. The reading is taken one tick
-    /// after a resend, when the client has just applied it.
+    /// Fails unless a resend from {@code EffectSyncTicker} reaches the vanilla client. The server
+    /// burns ten durations a tick with the rule on ({@code MobEffectInstanceMixin}), and the ticker
+    /// resends every effect to its own holder's connection every ten ticks.
+    ///
+    /// <p>The check first gives the client a duration the server does not hold, then requires the
+    /// next resend to put it back. Comparing the two durations without that step proves nothing:
+    /// the client runs the same {@code MobEffectInstanceMixin}, and {@code VirtualTime.isEnabled()}
+    /// reads the server's game rule through {@code ServerContext}, which a client GameTest shares
+    /// with its dedicated server, so the client burns ten durations a tick too and tracks the
+    /// server with no resend at all.
+    ///
+    /// <p>The subject is the recording player, not an effect target. A target is a {@link
+    /// ServerPlayer} whose connection is a fake {@code EmbeddedChannel}, so the ticker sends its
+    /// effects there and the recording client never receives them: a target's effect is absent on
+    /// the client, not merely stale.
     private static void requireClientEffectDurationSynchronized(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
@@ -1766,10 +1918,39 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             }
                             return effect.getDuration();
                         });
-        int clientDuration =
+        int given = serverDuration + EFFECT_SYNC_TOLERANCE_TICKS * 10;
+        context.runOnClient(
+                client -> {
+                    client.player.removeEffect(MobEffects.WATER_BREATHING);
+                    client.player.addEffect(
+                            new MobEffectInstance(
+                                    MobEffects.WATER_BREATHING, given, 0, false, false, false));
+                });
+        // The read is already on a resend tick, so the next one is ten ticks out: wait for the
+        // tick count to pass a whole resend period before reading again.
+        int perturbed = server.computeOnServer(_ -> serverTick);
+        while (server.computeOnServer(_ -> serverTick) - perturbed < 10
+                || server.computeOnServer(_ -> serverTick) % 10 != 1) {
+            context.waitTick();
+        }
+        int[] read = new int[2];
+        read[0] =
+                server.computeOnServer(
+                        current -> {
+                            MobEffectInstance effect =
+                                    player(current, playerId).getEffect(MobEffects.WATER_BREATHING);
+                            if (effect == null) {
+                                throw new AssertionError(
+                                        "Expected the recording player to hold the water breathing effect in "
+                                                + stage);
+                            }
+                            return effect.getDuration();
+                        });
+        read[1] =
                 context.computeOnClient(
                         client -> {
-                            MobEffectInstance effect = client.player.getEffect(MobEffects.WATER_BREATHING);
+                            MobEffectInstance effect =
+                                    client.player.getEffect(MobEffects.WATER_BREATHING);
                             if (effect == null) {
                                 throw new AssertionError(
                                         "Expected the vanilla client to receive the water breathing effect in "
@@ -1777,22 +1958,26 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             }
                             return effect.getDuration();
                         });
-        if (Math.abs(serverDuration - clientDuration) > EFFECT_SYNC_TOLERANCE_TICKS) {
+        if (Math.abs(read[0] - read[1]) > EFFECT_SYNC_TOLERANCE_TICKS) {
             throw new AssertionError(
                     "Expected the accelerated effect duration to reach the vanilla client in "
                             + stage
-                            + ": the server holds "
-                            + serverDuration
+                            + ": the client was given "
+                            + given
+                            + ", the server holds "
+                            + read[0]
                             + " and the client "
-                            + clientDuration);
+                            + read[1]);
         }
         System.out.println(
                 "AD_EFFECT_SYNC "
                         + stage
+                        + " given="
+                        + given
                         + " server="
-                        + serverDuration
+                        + read[0]
                         + " client="
-                        + clientDuration);
+                        + read[1]);
     }
 
     private static LivingEntity healerOf(
