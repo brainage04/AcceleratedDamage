@@ -167,9 +167,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
 
-    /// How far a client's effect duration may sit from the server's: the server burns ten
-    /// durations a tick and resends every ten ticks, so a client that received the last resend
-    /// holds a duration up to ten ticks behind, and one that missed it is hundreds ahead.
+    /// How far a client's effect duration may sit from the server's: the server burns ten durations
+    /// a tick and resends every ten ticks, so a client that received the last resend holds a
+    /// duration up to ten ticks behind, and one that missed it is hundreds ahead.
     private static final int EFFECT_SYNC_TOLERANCE_TICKS = 20;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
@@ -178,8 +178,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// the 26.3 sources).
     private static final int REGENERATION_AMPLIFIER = 1;
 
-    /// Long enough to outlast a half with the rules on, which burn ten ticks of it every tick.
-    /// The speed effect the client-duration check reads uses the same length.
+    /// Long enough to outlast a half with the rules on, which burn ten ticks of it every tick. The
+    /// speed effect the client-duration check reads uses the same length.
     private static final int REGENERATION_TICKS = 1200;
 
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
@@ -1008,8 +1008,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             context.waitTicks(INPUT_CADENCE_TICKS - 1);
             showHealth(context, server, targetId, stage, title, "hit " + hit);
         }
-        finishHalf(
-                context, server, stage, title, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
+        finishHalf(context, server, stage, title, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
     }
 
     private static void recordBow(
@@ -1661,8 +1660,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     + airLabel);
                     requireShot(context, stage, "after " + tick + " ticks", shot);
                     if (rulesOn && tick == READING_TICKS) {
-                        requireClientEffectDurationSynchronized(
-                                context, server, playerId, stage);
+                        requireClientEffectDurationSynchronized(context, server, playerId, stage);
                         // The check waits for a resend tick, so the caption it left on screen is
                         // older than the freshness bound allows; push it again from here.
                         String[] refreshed =
@@ -1719,11 +1717,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// Fails unless the vanilla client holds the same effect duration the server does for the
-    /// recording player. The server burns ten durations a tick with the rule on
-    /// ({@code MobEffectInstanceMixin}), and {@code EffectSyncTicker} resends every effect to its
-    /// own holder's connection every ten ticks, so a client that never received those packets
-    /// would still show the vanilla duration, hundreds of ticks ahead. The reading is taken one
-    /// tick after a resend, when the client has just applied it.
+    /// recording player. The server burns ten durations a tick with the rule on ({@code
+    /// MobEffectInstanceMixin}), and {@code EffectSyncTicker} resends every effect to its own
+    /// holder's connection every ten ticks, so a client that never received those packets would
+    /// still show the vanilla duration, hundreds of ticks ahead. The reading is taken one tick
+    /// after a resend, when the client has just applied it.
     private static void requireClientEffectDurationSynchronized(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
