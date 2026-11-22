@@ -10,6 +10,7 @@ import io.github.brainage04.minecraftmodconventions.ClientGameTestRecordingHud;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
+import io.github.brainage04.minecraftmodconventions.PerformanceOverlayPlacement;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
@@ -487,6 +488,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                             return recordingPlayerId(current);
                                         });
                         ClientGameTestServers.assertClientWorldAndPlayerAvailable(context);
+                        // The performance panel (fps, TPS, heap) is a diagnostic, not part of the
+                        // film: the recording keeps its numbers in its metadata.
+                        ClientGameTestRecorder.placePerformanceOverlay(
+                                context, PerformanceOverlayPlacement.HIDDEN);
                         // The film is cut to its stage markers, so the first marker has to be the
                         // first frame worth showing. The tour that loads every viewpoint runs
                         // before any marker, and the title card goes up on the melee scene, which
