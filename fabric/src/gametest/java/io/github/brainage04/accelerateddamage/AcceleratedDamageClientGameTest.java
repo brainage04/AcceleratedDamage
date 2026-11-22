@@ -224,8 +224,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int HALF_TICKS = 40;
 
     /// Ticks the last caption of a half stays on screen before its end marker. The cut keeps a
-    /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the
-    /// bow half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
+    /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the bow
+    /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
@@ -675,12 +675,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     ///
     /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
     /// the 26.3 sources), and in first person the camera sits at that eye. The renderer draws an
-    /// entity at the position lerped from its old position to its current one
-    /// ({@code EntityRenderer.java:163-165}), and the old position is the spawn point until the
-    /// entity's first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the first frame
-    /// of every shot draws the arrow across the near plane: a wall of its texture. The server's
-    /// arrow is untouched; only the client's copy has its old position moved, so the lerp starts
-    /// where the arrow already is.
+    /// entity at the position lerped from its old position to its current one ({@code
+    /// EntityRenderer.java:163-165}), and the old position is the spawn point until the entity's
+    /// first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the first frame of every
+    /// shot draws the arrow across the near plane: a wall of its texture. The server's arrow is
+    /// untouched; only the client's copy has its old position moved, so the lerp starts where the
+    /// arrow already is.
     private static void snapProjectilesOffTheCamera(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
@@ -701,9 +701,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the start of
     /// every client tick, through the camera's own view and projection matrices. A box with a
     /// corner behind the camera covers the whole screen, because part of it is drawn across the
-    /// near plane. The measurement runs after {@link #snapProjectilesOffTheCamera} in the same tick,
-    /// so it sees the frame that tick draws. The check runs at every stage marker and after every
-    /// shot, so a body across the lens fails the run instead of reaching the film.
+    /// near plane. The measurement runs after {@link #snapProjectilesOffTheCamera} in the same
+    /// tick, so it sees the frame that tick draws. The check runs at every stage marker and after
+    /// every shot, so a body across the lens fails the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
         String violation = WORST_FRAME;
         WORST_FRAME = null;
@@ -1543,9 +1543,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // the marker until it has run about two seconds, and never less than the last caption
         // needs to be drawn.
         context.waitTicks(
-                Math.max(
-                        MIN_LAST_CAPTION_TICKS,
-                        HALF_TICKS - (log.closeTick - log.openTick)));
+                Math.max(MIN_LAST_CAPTION_TICKS, HALF_TICKS - (log.closeTick - log.openTick)));
         requireLastCaptionShown(stage, lastLabel, log);
         closeStage(context, stage, 4);
         assertCadence(log, expectedInputs);
