@@ -685,14 +685,26 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (client.level == null || client.player == null) {
             return;
         }
+
         Vec3 eye = client.player.getEyePosition();
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof Projectile projectile) || entity == client.player) {
                 continue;
             }
-            if (projectile.oldPosition().distanceTo(eye) < 1.0) {
-                projectile.setOldPosAndRot();
+            // The arrow has not ticked yet, so its box is already at its flight position while
+            // its old position, which the renderer lerps from, is still the eye.
+            if (projectile.oldPosition().distanceTo(eye) >= 1.0) {
+                continue;
             }
+            // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
+            // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
+            // nothing either, because the current position is the eye too. The client's copy is
+            // moved a block along its own flight, and its old position with it so the lerp starts
+            // there. The server's arrow is untouched.
+            Vec3 motion = projectile.getDeltaMovement();
+            Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
+            projectile.setPos(eye.add(step));
+            projectile.setOldPosAndRot();
         }
     }
 
