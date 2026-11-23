@@ -714,6 +714,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
         }
+        // A target is teleported from its parking spot into the scene, and the client interpolates a
+        // player's move over two ticks (EntityTypes.java:1182 in the 26.3 sources), so the body is
+        // drawn along the line from the parking spot, which passes through the camera. The server's
+        // target is untouched; the client's copy has its old position snapped to where it is.
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (entity instanceof net.minecraft.world.entity.player.Player
+                    && TRACKED.containsKey(entity.getUUID())) {
+                entity.getInterpolation().cancel();
+                entity.setOldPosAndRot();
+            }
+        }
     }
 
     /// Fails a stage whose frame an entity fills more than half of.
