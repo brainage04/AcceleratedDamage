@@ -182,10 +182,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
     private static final float COOLDOWN_TICK_RATE = 5.0F;
 
-    /// Ticks the title card is on screen: one second at the 20 ticks a second the test has set at
-    /// that point ({@code TickRateManager.java:9} is the default). A card is a still, and a still
-    /// longer than 1.3 s reads as a stall.
-    private static final int TITLE_CARD_TICKS = 20;
+    /// Ticks the title card is on screen: 0.8 s at the 20 ticks a second the test has set at that
+    /// point ({@code TickRateManager.java:9} is the default). A card is a still, and a still longer
+    /// than 1.3 s reads as a stall; the cut adds the stage's own hold to this, so the card is
+    /// shorter than the bound by that hold.
+    private static final int TITLE_CARD_TICKS = 16;
 
     /// Ticks the client holds a spear before its own stab gate is read. The accelerated delay is
     /// 2.3 ticks, so the gate accepts the stab well inside this. The vanilla 23-tick delay would
