@@ -782,6 +782,24 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // no InputOverlay, and a direct reference would not compile there. The class is present
         // only
         // in a build that draws the overlay, so its absence is the failure this check is for.
+        // A plain GameTest run is not a recording, and the overlay draws only in one, so the check
+        // applies to a take and passes in the gate's own run.
+        boolean recording =
+                context.computeOnClient(
+                        _ -> {
+                            try {
+                                Class<?> session =
+                                        Class.forName(
+                                                "io.github.brainage04.minecraftmodconventions"
+                                                        + ".ClientGameTestRecordingSession");
+                                return (Boolean) session.getMethod("isEnabled").invoke(null);
+                            } catch (ReflectiveOperationException absent) {
+                                return false;
+                            }
+                        });
+        if (!recording) {
+            return;
+        }
         boolean on =
                 context.computeOnClient(
                         _ -> {
