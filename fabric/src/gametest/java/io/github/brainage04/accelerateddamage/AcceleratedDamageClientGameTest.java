@@ -779,14 +779,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// take is a recording.
     private static void requireKeysOverlay(ClientGameTestContext context) {
         // Reflected, not imported: the gate builds against the published conventions jar, which has
-        // no InputOverlay, and a direct reference would not compile there. The class is present
-        // only
-        // in a build that draws the overlay, so its absence is the failure this check is for. A
-        // plain GameTest run is not a recording, and the overlay draws only in one, so the check
-        // applies to a take and passes in the gate's own run.
-        // The session class is in every conventions jar this test can build against, so its absence
-        // is a broken build, not a plain run. A plain run has the class and reports the session
-        // off.
+        // no InputOverlay, and a direct reference would not compile there. The class is present only
+        // in a build that draws the overlay, so its absence is the failure this check is for. The
+        // session class is in every conventions jar this test can build against, so its absence is
+        // a broken build, not a plain run: a plain run has the class and reports the session off,
+        // and the check then passes, because the overlay draws only in a recording.
         boolean recording =
                 context.computeOnClient(
                         _ -> {
