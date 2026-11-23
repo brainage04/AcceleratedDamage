@@ -114,7 +114,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// The most of the frame one entity may cover. A player-shaped target at its own distance
     /// covers a few per cent of it; a body across the lens covers all of it. A take measured at 0.5
-    /// had three frames of the dummy at 45.8% and two at about 30%, so the bound is a quarter.
+    /// had three frames of the dummy at 45.8% and four at about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
     /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
@@ -778,12 +778,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// frame. The overlay draws only while a recording session is enabled, so this also proves the
     /// take is a recording.
     private static void requireKeysOverlay(ClientGameTestContext context) {
-        // Reflected, not imported: the gate builds against the published conventions jar, which has
-        // no InputOverlay, and a direct reference would not compile there. The class is present only
-        // in a build that draws the overlay, so its absence is the failure this check is for. The
-        // session class is in every conventions jar this test can build against, so its absence is
-        // a broken build, not a plain run: a plain run has the class and reports the session off,
-        // and the check then passes, because the overlay draws only in a recording.
+        // Reflected, not imported: the gate builds against the published conventions jar, which
+        // has no InputOverlay, and a direct reference would not compile there. The session class is
+        // in every conventions jar this test can build against, so its absence is a broken build,
+        // not a plain run: a plain run has the class and reports the session off, and the check
+        // then passes, because the overlay draws only in a recording.
         boolean recording =
                 context.computeOnClient(
                         _ -> {
@@ -834,7 +833,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (client.level == null || client.player == null) {
             return;
         }
-        float framePartialTick = 0.0F;
         // Camera.update only runs in the render pass (Camera.java:88-108 in the 26.3 sources), so
         // at the end of a client tick the camera still holds the previous frame's position and
         // rotation. The eye and the rotation the next frame will use are the player's own, so the
@@ -849,7 +847,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // lerp(partialTick, eyeHeightOld, eyeHeight) (Camera.java:265), not getEyeHeight(); the
         // recording player stands still, so the two agree to within a hundredth of a block.
         {
-            float partialTick = framePartialTick;
+            float partialTick = 0.0F;
             Quaternionf rotation =
                     new Quaternionf()
                             .rotationYXZ(
@@ -1490,8 +1488,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// vanilla delay it would refuse for 23 ticks.
     ///
     /// <p>This is a check, not a stage: a filmed spear stage showed the spear held in the air and
-    /// never the swing landing, so the gate is read here and the film does not show it. The cause
-    /// of the missing swing is not established.
+    /// never the swing landing, so the gate is read here and the film does not show it. The take
+    /// that filmed it threw {@code IllegalArgumentException: Can't find id for 'minecraft:spear'}
+    /// while encoding {@code clientbound/minecraft:damage_event}; why the id is missing is not
+    /// established.
     private static void requireSpearGate(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         String stage = "showcase.spear";
