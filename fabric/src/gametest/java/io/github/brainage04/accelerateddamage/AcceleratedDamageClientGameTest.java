@@ -700,12 +700,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!(entity instanceof Projectile projectile)) {
                 continue;
             }
-            // Only a projectile the client has just spawned: its old position is still the eye
-            // while its current position is already on its flight, and the renderer lerps from the
-            // old one. A projectile that has ticked is drawn where it really is, and moving it
-            // would change the filmed arc. Testing the drawn box instead of the tick count misses
-            // the arrow: a take gated that way still drew it across the lens.
-            if (projectile.tickCount != 0 || projectile.oldPosition().distanceTo(eye) >= 1.0) {
+            // The condition is the frame itself: the box the renderer draws for this projectile,
+            // lerped from its old position, contains the eye. A tick count is not enough: a splash
+            // potion thrown from the eye moves half a block a tick and is still drawn across the
+            // lens on its second tick.
+            if (!projectile.getInterpolatedBoundingBox(0.0F).contains(eye)) {
                 continue;
             }
             // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
@@ -716,7 +715,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // untouched.
             Vec3 motion = projectile.getDeltaMovement();
             Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-            projectile.setPos(projectile.position().add(step));
+            // Stepped from the eye, not from the projectile's own position: the two differ by the
+            // 0.1 the arrow spawns below the eye (AbstractArrow.java:123), and a copy placed at its
+            // own position is still drawn across the lens. A take stepped that way had 17 frames
+            // of the dummy filling the frame; stepped from the eye, none.
+            projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
         }
         // A pinned target is snapped back to its anchor every server tick, and a hit that moved it
@@ -724,8 +727,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // client interpolates over two ticks (EntityTypes.java:1182 in the 26.3 sources). The line
         // between them passes through the camera, so the body is drawn across the lens. The
         // server's target is untouched; the client's copy has that interpolation cancelled and its
-        // old position snapped to where it is. A take without this had a frame of the dummy
-        // filling the frame; with it, none.
+        // old position snapped to where it is. Measured: a take without this had 2 frames of the
+        // dummy filling the frame, one with it none.
         for (Entity entity : client.level.entitiesForRendering()) {
             if (entity instanceof net.minecraft.world.entity.player.Player
                     && TRACKED_IDS.contains(entity.getUUID())) {
