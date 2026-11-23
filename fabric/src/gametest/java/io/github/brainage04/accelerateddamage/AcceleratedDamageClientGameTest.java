@@ -10,6 +10,7 @@ import io.github.brainage04.minecraftmodconventions.ClientGameTestRecordingHud;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
+import io.github.brainage04.minecraftmodconventions.InputOverlay;
 import io.github.brainage04.minecraftmodconventions.PerformanceOverlayPlacement;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -113,8 +114,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final double NEAR_PLANE = 0.05;
 
     /// The most of the frame one entity may cover. A player-shaped target four blocks from the
-    /// camera covers about a fifth of it; a body across the lens covers all of it.
-    private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.5;
+    /// camera covers about a fifth of it; a body across the lens covers all of it. A take measured
+    /// at 0.5 had three frames of the dummy at 45.8% and two at about 30%, so the bound is the
+    /// fifth a target at its own distance covers.
+    private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
     /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
     /// check, or null when no entity covered more than that.
@@ -180,9 +183,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
     private static final float COOLDOWN_TICK_RATE = 5.0F;
 
-    /// Ticks the title card is on screen: two seconds at the 20 ticks a second the test has set at
-    /// that point ({@code TickRateManager.java:9} is the default).
-    private static final int TITLE_CARD_TICKS = 40;
+    /// Ticks the title card is on screen: one second at the 20 ticks a second the test has set at
+    /// that point ({@code TickRateManager.java:9} is the default). A card is a still, and a still
+    /// longer than 1.3 s reads as a stall.
+    private static final int TITLE_CARD_TICKS = 20;
 
     /// Ticks the client holds a spear before its own stab gate is read. The accelerated delay is
     /// 2.3 ticks, so the gate accepts the stab well inside this. The vanilla 23-tick delay would
@@ -535,6 +539,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         // film: the recording keeps its numbers in its metadata.
                         ClientGameTestRecorder.placePerformanceOverlay(
                                 context, PerformanceOverlayPlacement.HIDDEN);
+                        requireKeysOverlay(context);
                         // The film is cut to its stage markers, so the first marker has to be the
                         // first frame worth showing. The tour that loads every viewpoint runs
                         // before any marker, and the title card goes up on the melee scene, which
@@ -746,6 +751,19 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (violation != null) {
             throw new AssertionError(
                     "Expected no entity to fill the frame in " + stage + ": " + violation);
+        }
+    }
+
+    /// Fails unless the recording's keys display is on: the film is watched to see what the player
+    /// did, and a take whose client loaded a conventions jar without the overlay has no caps in any
+    /// frame. The overlay draws only while a recording session is enabled, so this also proves the
+    /// take is a recording.
+    private static void requireKeysOverlay(ClientGameTestContext context) {
+        boolean on = context.computeOnClient(_ -> InputOverlay.isEnabled());
+        if (!on) {
+            throw new AssertionError(
+                    "Expected the recording's keys display to be on: the client's conventions jar has"
+                            + " no InputOverlay, or the recording session is not enabled");
         }
     }
 
