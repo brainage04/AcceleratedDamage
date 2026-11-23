@@ -10,7 +10,6 @@ import io.github.brainage04.minecraftmodconventions.ClientGameTestRecordingHud;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
-import io.github.brainage04.minecraftmodconventions.InputOverlay;
 import io.github.brainage04.minecraftmodconventions.PerformanceOverlayPlacement;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -779,7 +778,23 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// frame. The overlay draws only while a recording session is enabled, so this also proves the
     /// take is a recording.
     private static void requireKeysOverlay(ClientGameTestContext context) {
-        boolean on = context.computeOnClient(_ -> InputOverlay.isEnabled());
+        // Reflected, not imported: the gate builds against the published conventions jar, which has
+        // no InputOverlay, and a direct reference would not compile there. The class is present
+        // only
+        // in a build that draws the overlay, so its absence is the failure this check is for.
+        boolean on =
+                context.computeOnClient(
+                        _ -> {
+                            try {
+                                Class<?> overlay =
+                                        Class.forName(
+                                                "io.github.brainage04.minecraftmodconventions"
+                                                        + ".InputOverlay");
+                                return (Boolean) overlay.getMethod("isEnabled").invoke(null);
+                            } catch (ReflectiveOperationException absent) {
+                                return false;
+                            }
+                        });
         if (!on) {
             throw new AssertionError(
                     "Expected the recording's keys display to be on: the client's conventions jar has"
