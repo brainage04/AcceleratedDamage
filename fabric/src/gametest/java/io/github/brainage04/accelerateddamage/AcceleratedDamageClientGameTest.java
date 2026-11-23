@@ -1450,6 +1450,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int playerId,
             int targetId,
             Consumer<MinecraftServer> prepare) {
+        // Cleared so a half that never pushes a caption cannot be checked against the last half's.
+        LAST_CAPTION = null;
         server.runOnServer(
                 current -> {
                     prepare.accept(current);
