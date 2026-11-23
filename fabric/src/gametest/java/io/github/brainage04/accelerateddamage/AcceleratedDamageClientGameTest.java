@@ -123,6 +123,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
 
+    /// The server tick the current half's last caption was pushed on, for
+    /// {@link #requireLastCaptionShown}.
+    private static volatile int LAST_CAPTION_TICK;
+
     private static final int ARENA_Y = 64;
     private static final double RANGE_X = -6.5D;
     private static final Vec3 MELEE_STAND = new Vec3(0.5, ARENA_Y, 1.5);
@@ -289,10 +293,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
 
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
-
-    /// The ids in {@link #TRACKED}, published for the client thread, which must not read the map
-    /// while the server thread changes it.
-    private static volatile Set<UUID> TRACKED_IDS = Set.of();
 
     private static boolean listenersRegistered;
 
@@ -601,7 +601,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         context.waitTicks(4);
                     } finally {
                         TRACKED.clear();
-                        publishTrackedIds();
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
                 });
@@ -707,6 +706,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!projectile.getInterpolatedBoundingBox(0.0F).contains(eye)) {
                 continue;
             }
+            // Only the recording player's own shots: a projectile another entity spawned at the eye
+            // is not this film's, and moving it would change what the take shows.
+            if (projectile.getOwner() != client.player) {
+                continue;
+            }
             // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
             // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
             // nothing either, because the current position is the eye too. The client's copy's
@@ -721,20 +725,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // of the dummy filling the frame; stepped from the eye, none.
             projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
-        }
-        // A pinned target is snapped back to its anchor every server tick, and a hit that moved it
-        // and was snapped back in the same tick reaches the client as two positions, which the
-        // client interpolates over two ticks (EntityTypes.java:1182 in the 26.3 sources). The line
-        // between them passes through the camera, so the body is drawn across the lens. The
-        // server's target is untouched; the client's copy has that interpolation cancelled and its
-        // old position snapped to where it is. Measured: a take without this had 2 frames of the
-        // dummy filling the frame, one with it none.
-        for (Entity entity : client.level.entitiesForRendering()) {
-            if (entity instanceof net.minecraft.world.entity.player.Player
-                    && TRACKED_IDS.contains(entity.getUUID())) {
-                entity.getInterpolation().cancel();
-                entity.setOldPosAndRot();
-            }
         }
     }
 
@@ -894,7 +884,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ServerPlayer target = server.getPlayerList().getPlayer(tracked.id());
             if (target == null || target.isRemoved()) {
                 TRACKED.remove(tracked.id());
-                publishTrackedIds();
                 continue;
             }
             if (FED.contains(target.getId())) {
@@ -1524,6 +1513,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestRecorder.showStep(
                 context, stage, title, label + ", health " + health(health));
         LAST_CAPTION_HEALTH = health;
+        LAST_CAPTION_TICK = serverTick;
         requireNoEntityFillsTheFrame(stage);
     }
 
@@ -1545,8 +1535,19 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + ", it showed "
                             + caption);
         }
-        // The hold in finishHalf is what keeps the caption on screen, so there is nothing to
-        // assert about its length here: the label and the health are what this check is for.
+        // The cut keeps a stage up to its end marker, so a caption pushed on the marker's own tick
+        // is never drawn. The hold in finishHalf is what keeps it on screen, and this is what makes
+        // removing that hold fail.
+        int shown = serverTick - LAST_CAPTION_TICK;
+        if (shown < MIN_LAST_CAPTION_TICKS) {
+            throw new AssertionError(
+                    "Expected the last caption of "
+                            + stage
+                            + " to stay on screen for "
+                            + MIN_LAST_CAPTION_TICKS
+                            + " ticks before its end marker, it had "
+                            + shown);
+        }
     }
 
     /// Waits until every projectile of the half has reached the target, pushing the caption on
@@ -2613,13 +2614,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setCustomNameVisible(true);
         DUMMIES.put(name, target.getId());
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, PARKING));
-        publishTrackedIds();
-    }
-
-    /// Publishes the tracked ids for the client thread, which must not read {@link #TRACKED} while
-    /// the server thread changes it.
-    private static void publishTrackedIds() {
-        TRACKED_IDS = Set.copyOf(TRACKED.keySet());
     }
 
     /// An effect target: pinned in its cell with full effect-target health, facing the camera.
@@ -2647,7 +2641,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 0.0F,
                 false);
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, position));
-        publishTrackedIds();
         return id;
     }
 
@@ -2692,7 +2685,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     0.0F,
                     false);
             TRACKED.put(player.getUUID(), new TrackedTarget(player.getUUID(), name, PARKING));
-            publishTrackedIds();
         } else if (target != null) {
             target.discard();
         }
@@ -2701,7 +2693,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void restoreState(MinecraftServer server) {
         restoreRules(server);
         TRACKED.clear();
-        publishTrackedIds();
         hitLog = null;
         FED.clear();
         Objective air = server.getScoreboard().getObjective(AIR_OBJECTIVE);

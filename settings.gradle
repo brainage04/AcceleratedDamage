@@ -38,8 +38,20 @@ pluginManagement {
 	}
 }
 
+
+// The recording helper mod is a dependency, not a plugin, and an included build substitutes by
+// project name (MinecraftModConventions), so io.github.brainage04:minecraftmodconventions still
+// resolved from Maven Central and the take ran the published jar, which has no input overlay. The
+// substitution points that module at the sibling's own project, so the take runs the jar built
+// from this checkout.
 if (settings.ext.useLocalConventions && file("../MinecraftModConventions/settings.gradle").exists()) {
-	includeBuild("../MinecraftModConventions")
+	includeBuild("../MinecraftModConventions") {
+		dependencySubstitution {
+			substitute(module("io.github.brainage04:minecraftmodconventions"))
+					.using(project(":"))
+					.because("the take must run the conventions build from this checkout")
+		}
+	}
 }
 
 rootProject.name = 'AcceleratedDamage'
