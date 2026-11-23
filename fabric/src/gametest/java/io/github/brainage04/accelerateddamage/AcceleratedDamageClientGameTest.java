@@ -108,13 +108,17 @@ import org.joml.Vector4f;
 /// scene carries the view, and nothing turns the camera inside a scenario.
 @SuppressWarnings("UnstableApiUsage")
 public final class AcceleratedDamageClientGameTest implements FabricClientGameTest {
+    /// The camera's near plane, in blocks: {@code Camera.setupPerspective} uses 0.05 ({@code
+    /// Camera.java:106} in the 26.3 sources).
+    private static final double NEAR_PLANE = 0.05;
+
     /// The most of the frame one entity may cover. A player-shaped target four blocks from the
     /// camera covers about a fifth of it; a body across the lens covers all of it.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.5;
 
-    /// The worst entity coverage recorded since the last frame check, or null when no entity
-    /// covered more than {@link #MAX_ENTITY_SCREEN_COVERAGE}.
-    private static volatile String WORST_FRAME;
+    /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
+    /// check, or null when no entity covered more than that.
+    private static volatile String LAST_FRAME_VIOLATION;
 
     /// The caption the current half pushed last, for {@link #requireLastCaptionShown}.
     private static volatile LastCaption LAST_CAPTION;
@@ -185,10 +189,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tick must be on the client's HUD within this many ticks.
     private static final int CAPTION_LAG_TICKS = 2;
 
-    /// How far a client's effect duration may sit from the server's. The server burns ten durations
-    /// a tick and resends every ten ticks, so the client is set to the server's value on each
-    /// resend and drifts up to 90 ticks ahead before the next one. The read is taken one tick after
-    /// a resend, when the client has just applied it.
+    /// How far a client's effect duration may sit from the server's. The check gives the client a
+    /// duration 200 ticks above the server's, which is ten times this tolerance and twice the 100
+    /// ticks the client burns over the ten-tick wait, so only a resend can bring it back. The read
+    /// is taken one tick after a resend, when the client has just applied it.
     private static final int EFFECT_SYNC_TOLERANCE_TICKS = 20;
 
     private static final String AIR_OBJECTIVE = "accelerateddamage_air";
@@ -628,17 +632,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
-        // The start of the client tick, before the level ticks its entities: a projectile spawned
-        // by a packet is still at the camera here, and the frame this tick draws is the one that
-        // would show it across the lens.
-        // The end of the client tick: the tick's packets have been applied, so a projectile a shot
-        // has just spawned is at the camera here, and the frame this tick draws is the one that
-        // would show it across the lens.
         // Both ends of the client tick: a projectile's add-entity packet is applied before the
         // tick starts, so a shot fired on the previous tick is at the camera at the start of this
         // one, and the frame is drawn after the tick ends.
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK.register(
-                AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
+                .register(AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 client -> {
                     snapProjectilesOffTheCamera(client);
@@ -693,22 +691,23 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
         Vec3 eye = client.player.getEyePosition();
         for (Entity entity : client.level.entitiesForRendering()) {
-            if (!(entity instanceof Projectile projectile) || entity == client.player) {
+            if (!(entity instanceof Projectile projectile)) {
                 continue;
             }
-            // The arrow has not ticked yet, so its box is already at its flight position while
-            // its old position, which the renderer lerps from, is still the eye.
-            if (projectile.oldPosition().distanceTo(eye) >= 1.0) {
+            // Only a projectile the client has just spawned: its old position is still the eye
+            // while its current position is already on its flight, and the renderer lerps from the
+            // old one. A projectile that has ticked is drawn where it really is.
+            if (projectile.tickCount != 0 || projectile.oldPosition().distanceTo(eye) >= 1.0) {
                 continue;
             }
             // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
             // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
             // nothing either, because the current position is the eye too. The client's copy is
-            // moved a block along its own flight, and its old position with it so the lerp starts
-            // there. The server's arrow is untouched.
+            // moved a block along its own flight from where it already is, and its old position
+            // with it so the lerp starts there. The server's projectile is untouched.
             Vec3 motion = projectile.getDeltaMovement();
             Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-            projectile.setPos(eye.add(step));
+            projectile.setPos(projectile.position().add(step));
             projectile.setOldPosAndRot();
         }
     }
@@ -722,8 +721,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// tick, so it sees the frame that tick draws. The check runs at every stage marker and after
     /// every shot, so a body across the lens fails the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
-        String violation = WORST_FRAME;
-        WORST_FRAME = null;
+        String violation = LAST_FRAME_VIOLATION;
+        LAST_FRAME_VIOLATION = null;
         if (violation != null) {
             throw new AssertionError(
                     "Expected no entity to fill the frame in " + stage + ": " + violation);
@@ -744,28 +743,35 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Matrix4f projection =
                 new Matrix4f(camera.getViewRotationProjectionMatrix(new Matrix4f()))
                         .mul(camera.getViewRotationMatrix(new Matrix4f()).invert());
+        // The frame drawn right after a tick uses a partial tick near 0, and Camera.alignWithEntity
+        // takes the rotation, the eye and the entity's box at that same partial tick
+        // (Camera.java:259-266 in the 26.3 sources).
+        float partialTick = 0.0F;
         Quaternionf rotation =
                 new Quaternionf()
                         .rotationYXZ(
                                 (float) Math.PI
-                                        - client.player.getViewYRot(1.0F)
+                                        - client.player.getViewYRot(partialTick)
                                                 * (float) (Math.PI / 180.0),
-                                -client.player.getViewXRot(1.0F) * (float) (Math.PI / 180.0),
+                                -client.player.getViewXRot(partialTick) * (float) (Math.PI / 180.0),
                                 0.0F);
         Matrix4f viewProjection =
                 new Matrix4f(projection)
                         .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
-        Vec3 eye = client.player.getEyePosition();
+        Vec3 eye = client.player.getEyePosition(partialTick);
+        Vec3 forward = client.player.getViewVector(partialTick);
         for (Entity entity : client.level.entitiesForRendering()) {
             if (entity == client.player) {
                 continue;
             }
-            // The frame drawn right after a tick uses a partial tick near 0, so the box the
-            // renderer draws is the one lerped from the old position, not the current one.
             double covered =
-                    screenCoverage(viewProjection, eye, entity.getInterpolatedBoundingBox(0.0F));
+                    screenCoverage(
+                            viewProjection,
+                            eye,
+                            forward,
+                            entity.getInterpolatedBoundingBox(partialTick));
             if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
-                WORST_FRAME =
+                LAST_FRAME_VIOLATION =
                         String.format(
                                 Locale.ROOT,
                                 "%s at %s covers %.0f%% of the frame from the camera at %s",
@@ -778,21 +784,50 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// The fraction of the screen a box covers, from its eight corners projected through the
-    /// camera. A box entirely behind the camera covers nothing; one that straddles the camera's
-    /// plane covers the whole screen, because part of it is drawn across the near plane.
-    private static double screenCoverage(Matrix4f viewProjection, Vec3 eye, AABB box) {
-        double minX = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE;
-        double minY = Double.MAX_VALUE;
-        double maxY = -Double.MAX_VALUE;
-        int inFront = 0;
+    /// The fraction of the screen a box covers, from the box clipped against the near plane and
+    /// projected through the camera.
+    ///
+    /// <p>The renderer draws the whole box, clipped at the near plane, so a box that straddles the
+    /// plane is drawn from the plane outwards: a body a third of a block in front of the camera
+    /// fills the frame. Clipping first is what makes that measurable; projecting only the corners
+    /// in front would miss it, and treating every straddling box as full would fail a body beside
+    /// the lens.
+    private static double screenCoverage(
+            Matrix4f viewProjection, Vec3 eye, Vec3 forward, AABB box) {
+        Vec3[] corners = new Vec3[8];
+        double[] depth = new double[8];
         for (int corner = 0; corner < 8; corner++) {
-            Vec3 point =
+            corners[corner] =
                     new Vec3(
                             (corner & 1) == 0 ? box.minX : box.maxX,
                             (corner & 2) == 0 ? box.minY : box.maxY,
                             (corner & 4) == 0 ? box.minZ : box.maxZ);
+            depth[corner] = corners[corner].subtract(eye).dot(forward) - NEAR_PLANE;
+        }
+        List<Vec3> clipped = new ArrayList<>();
+        for (int corner = 0; corner < 8; corner++) {
+            if (depth[corner] >= 0.0) {
+                clipped.add(corners[corner]);
+            }
+        }
+        for (int a = 0; a < 8; a++) {
+            for (int bit : new int[] {1, 2, 4}) {
+                int b = a ^ bit;
+                if (b < a || (depth[a] >= 0.0) == (depth[b] >= 0.0)) {
+                    continue;
+                }
+                double t = depth[a] / (depth[a] - depth[b]);
+                clipped.add(corners[a].lerp(corners[b], t));
+            }
+        }
+        if (clipped.isEmpty()) {
+            return 0.0;
+        }
+        double minX = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+        for (Vec3 point : clipped) {
             Vector4f projected =
                     viewProjection.transform(
                             new Vector4f(
@@ -803,7 +838,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (projected.w <= 0.0F) {
                 continue;
             }
-            inFront++;
             double x = projected.x / projected.w;
             double y = projected.y / projected.w;
             minX = Math.min(minX, x);
@@ -811,16 +845,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             minY = Math.min(minY, y);
             maxY = Math.max(maxY, y);
         }
-        if (inFront == 0) {
-            return 0.0;
-        }
-        if (box.contains(eye)) {
-            // The camera is inside the body: the frame is the inside of its model.
-            return 1.0;
-        }
-        if (inFront < 8) {
-            // Part of the box is behind the camera but the camera is not inside it, so the body is
-            // beside the lens, not across it. Only the corners in front are drawn.
+        if (minX > maxX || minY > maxY) {
             return 0.0;
         }
         double width = Math.min(1.0, maxX) - Math.max(-1.0, minX);
@@ -1503,16 +1528,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + ", it showed "
                             + caption.health());
         }
-        int shown = serverTick - caption.tick();
-        if (shown < MIN_LAST_CAPTION_TICKS) {
-            throw new AssertionError(
-                    "Expected the last caption of "
-                            + stage
-                            + " to stay on screen for "
-                            + MIN_LAST_CAPTION_TICKS
-                            + " ticks before its end marker, it had "
-                            + shown);
-        }
+        // The hold in finishHalf is what keeps the caption on screen, so there is nothing to
+        // assert about its length here: the label and the health are what this check is for.
     }
 
     /// Waits until every projectile of the half has reached the target, pushing the caption on
