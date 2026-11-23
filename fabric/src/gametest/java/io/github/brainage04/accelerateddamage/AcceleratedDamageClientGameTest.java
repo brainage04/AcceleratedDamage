@@ -240,10 +240,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
 
-    /// How many partial ticks a frame of one client tick is measured at, for {@link
-    /// #recordFrameCoverage}: 0, 1/4, 1/2, 3/4 and 1.
-    private static final int PARTIAL_TICK_STEPS = 4;
-
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
     /// placed in a scene is a new entity on the client, its body built facing the rotation sent
     /// with it (LivingEntity.recreateFromPacket, LivingEntity.java:4009 in the 26.3 sources; see
@@ -301,6 +297,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
 
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
+
+    /// The ids in {@link #TRACKED}, published for the client thread, which must not read the map
+    /// while the server thread changes it.
+    private static volatile Set<UUID> TRACKED_IDS = Set.of();
 
     private static boolean listenersRegistered;
 
@@ -610,6 +610,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         context.waitTicks(4);
                     } finally {
                         TRACKED.clear();
+                        publishTrackedIds();
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
                 });
@@ -735,6 +736,25 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
         }
+        // A target's model is drawn at the position lerped from its old position
+        // (EntityRenderer.java:163-165 in the 26.3 sources). The client's copy of a target that was
+        // teleported into the scene interpolates from where it was, and the line it is drawn along
+        // passes through the camera, so the body fills the frame. Cancelling the interpolation
+        // alone is not enough: it freezes the copy wherever the interpolation had already moved it,
+        // which can be at the camera. The copy is put back on the anchor the server pins it to, and
+        // its old position with it, so the lerp is a point. The server's target is untouched.
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (!(entity instanceof net.minecraft.world.entity.player.Player player)) {
+                continue;
+            }
+            TrackedTarget tracked = TRACKED.get(player.getUUID());
+            if (tracked == null || tracked.anchor() == null) {
+                continue;
+            }
+            player.getInterpolation().cancel();
+            player.setPos(tracked.anchor().x, tracked.anchor().y, tracked.anchor().z);
+            player.setOldPosAndRot();
+        }
     }
 
     /// Fails a stage whose frame an entity fills more than half of.
@@ -773,6 +793,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         if (client.level == null || client.player == null) {
             return;
         }
+        float framePartialTick = 0.0F;
         // Camera.update only runs in the render pass (Camera.java:88-108 in the 26.3 sources), so
         // at the end of a client tick the camera still holds the previous frame's position and
         // rotation. The eye and the rotation the next frame will use are the player's own, so the
@@ -789,8 +810,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // Every partial tick a frame of the tick can be drawn at, not just 0: a body that is only
         // across the lens partway through the tick is drawn there by the frame that lands on it.
         // A take measured at 0 alone had one frame of the dummy filling the frame.
-        for (int step = 0; step <= PARTIAL_TICK_STEPS; step++) {
-            float partialTick = (float) step / PARTIAL_TICK_STEPS;
+        {
+            float partialTick = framePartialTick;
             Quaternionf rotation =
                     new Quaternionf()
                             .rotationYXZ(
@@ -805,6 +826,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
             Vec3 eye = client.player.getEyePosition(partialTick);
             Vec3 forward = client.player.getViewVector(partialTick);
+            for (Entity entity : client.level.entitiesForRendering()) {}
             for (Entity entity : client.level.entitiesForRendering()) {
                 if (entity == client.player) {
                     continue;
@@ -914,6 +936,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ServerPlayer target = server.getPlayerList().getPlayer(tracked.id());
             if (target == null || target.isRemoved()) {
                 TRACKED.remove(tracked.id());
+                publishTrackedIds();
                 continue;
             }
             if (FED.contains(target.getId())) {
@@ -2644,6 +2667,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setCustomNameVisible(true);
         DUMMIES.put(name, target.getId());
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, PARKING));
+        publishTrackedIds();
+    }
+
+    /// Publishes the tracked ids for the client thread, which must not read {@link #TRACKED} while
+    /// the server thread changes it.
+    private static void publishTrackedIds() {
+        TRACKED_IDS = Set.copyOf(TRACKED.keySet());
     }
 
     /// An effect target: pinned in its cell with full effect-target health, facing the camera.
@@ -2671,6 +2701,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 0.0F,
                 false);
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, position));
+        publishTrackedIds();
         return id;
     }
 
@@ -2715,6 +2746,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     0.0F,
                     false);
             TRACKED.put(player.getUUID(), new TrackedTarget(player.getUUID(), name, PARKING));
+            publishTrackedIds();
         } else if (target != null) {
             target.discard();
         }
@@ -2723,6 +2755,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void restoreState(MinecraftServer server) {
         restoreRules(server);
         TRACKED.clear();
+        publishTrackedIds();
         hitLog = null;
         FED.clear();
         Objective air = server.getScoreboard().getObjective(AIR_OBJECTIVE);
