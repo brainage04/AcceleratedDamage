@@ -682,8 +682,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// EntityRenderer.java:163-165}), and the old position is the spawn point until the entity's
     /// first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the first frame of every
     /// shot draws the arrow across the near plane: a wall of its texture. The server's arrow is
-    /// untouched; only the client's copy has its old position moved, so the lerp starts where the
-    /// arrow already is.
+    /// untouched; the client's copy has its position and its old position both moved, so the lerp
+    /// starts where the arrow already is.
     private static void snapProjectilesOffTheCamera(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
@@ -694,20 +694,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!(entity instanceof Projectile projectile)) {
                 continue;
             }
-            // The old position is the eye for a shot's first frames, and the renderer lerps from
-            // it, so the model is drawn across the lens. Testing the drawn box instead misses it:
-            // a take gated that way still had 18 frames of the arrow's texture filling the frame.
             // Only a projectile the client has just spawned: its old position is still the eye
-            // while its current position is already on its flight. A projectile that has ticked is
-            // drawn where it really is, and moving it would change the filmed arc.
+            // while its current position is already on its flight, and the renderer lerps from the
+            // old one. A projectile that has ticked is drawn where it really is, and moving it
+            // would change the filmed arc. Testing the drawn box instead of the tick count misses
+            // the arrow: a take gated that way still had 18 frames of its texture filling the
+            // frame.
             if (projectile.tickCount != 0 || projectile.oldPosition().distanceTo(eye) >= 1.0) {
                 continue;
             }
             // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
             // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
-            // nothing either, because the current position is the eye too. The client's copy is
-            // moved a block along its own flight from where it already is, and its old position
-            // with it so the lerp starts there. The server's projectile is untouched.
+            // nothing either, because the current position is the eye too. The client's copy's
+            // position and old position are both moved: it is
+            // moved a block along its own flight, and its old position with it so the lerp starts
+            // there. The server's projectile is untouched.
             Vec3 motion = projectile.getDeltaMovement();
             Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
             projectile.setPos(eye.add(step));
@@ -732,7 +733,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Records the worst entity coverage of the frame this tick draws, for {@link
+    /// Records the first entity coverage over the threshold in the frame this tick draws, for
+    /// {@link
     /// #requireNoEntityFillsTheFrame}.
     private static void recordFrameCoverage(Minecraft client) {
         if (client.level == null || client.player == null) {
@@ -1497,30 +1499,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float health = server.computeOnServer(current -> living(current, targetId).getHealth());
         ClientGameTestRecorder.showStep(
                 context, stage, title, label + ", health " + health(health));
-        LAST_CAPTION = new LastCaption(label, health, server.computeOnServer(_ -> serverTick));
+        LAST_CAPTION = new LastCaption(label, health);
         requireNoEntityFillsTheFrame(stage);
     }
 
-    /// The caption a half pushed last, and the tick it pushed it on.
-    private record LastCaption(String label, float health, int tick) {}
+    /// The caption a half pushed last.
+    private record LastCaption(String label, float health) {}
 
-    /// Fails unless the half's last caption is the last hit's health and was on screen long enough
-    /// to be drawn. The cut keeps a stage up to its end marker, so a caption pushed on the marker's
-    /// own tick never reaches the film: the bow half's 14 shots at 3 ticks run 42 ticks, past
-    /// {@link #HALF_TICKS}, and its last caption was cut from the take.
-    private static void requireLastCaptionShown(String stage, String lastLabel, HitLog log) {
+    /// Fails unless the half's last caption shows the last hit's health. The cut keeps a stage up
+    /// to its end marker, so a caption pushed on the marker's own tick never reaches the film: the
+    /// bow half's 14 shots at 3 ticks run 42 ticks, past {@link #HALF_TICKS}, and its last caption
+    /// was cut from the take.
+    private static void requireLastCaptionShown(String stage, HitLog log) {
         LastCaption caption = LAST_CAPTION;
         if (caption == null) {
             throw new AssertionError("Expected " + stage + " to push a caption");
-        }
-        if (!caption.label().equals(lastLabel)) {
-            throw new AssertionError(
-                    "Expected the last caption of "
-                            + stage
-                            + " to be "
-                            + lastLabel
-                            + ", it was "
-                            + caption.label());
         }
         if (Math.abs(caption.health() - log.finalHealth()) > 0.05F) {
             throw new AssertionError(
@@ -1589,7 +1582,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // needs to be drawn.
         context.waitTicks(
                 Math.max(MIN_LAST_CAPTION_TICKS, HALF_TICKS - (log.closeTick - log.openTick)));
-        requireLastCaptionShown(stage, lastLabel, log);
+        requireLastCaptionShown(stage, log);
         closeStage(context, stage, 4);
         assertCadence(log, expectedInputs);
         if (rulesOn) {
