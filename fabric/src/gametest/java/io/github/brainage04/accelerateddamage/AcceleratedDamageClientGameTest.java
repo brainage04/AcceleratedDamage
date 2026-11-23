@@ -297,9 +297,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
 
-    /// The ids in {@link #TRACKED}, published for the client thread, which must not read the map
-    /// while the server thread changes it.
-    private static volatile Set<UUID> TRACKED_IDS = Set.of();
+    /// The anchors of the targets in {@link #TRACKED}, published for the client thread, which must
+    /// not read the map while the server thread changes it.
+    private static volatile Map<UUID, Vec3> TRACKED_ANCHORS = Map.of();
 
     private static boolean listenersRegistered;
 
@@ -746,12 +746,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!(entity instanceof net.minecraft.world.entity.player.Player player)) {
                 continue;
             }
-            TrackedTarget tracked = TRACKED.get(player.getUUID());
-            if (tracked == null || tracked.anchor() == null) {
+            Vec3 anchor = TRACKED_ANCHORS.get(player.getUUID());
+            if (anchor == null) {
                 continue;
             }
             player.getInterpolation().cancel();
-            player.setPos(tracked.anchor().x, tracked.anchor().y, tracked.anchor().z);
+            player.setPos(anchor.x, anchor.y, anchor.z);
             player.setOldPosAndRot();
         }
     }
@@ -2706,7 +2706,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Publishes the tracked ids for the client thread, which must not read {@link #TRACKED} while
     /// the server thread changes it.
     private static void publishTrackedIds() {
-        TRACKED_IDS = Set.copyOf(TRACKED.keySet());
+        Map<UUID, Vec3> anchors = new LinkedHashMap<>();
+        TRACKED.forEach(
+                (id, tracked) -> {
+                    if (tracked.anchor() != null) {
+                        anchors.put(id, tracked.anchor());
+                    }
+                });
+        TRACKED_ANCHORS = Map.copyOf(anchors);
     }
 
     /// An effect target: pinned in its cell with full effect-target health, facing the camera.
