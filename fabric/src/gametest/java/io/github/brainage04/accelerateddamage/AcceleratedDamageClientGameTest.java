@@ -694,9 +694,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (!(entity instanceof Projectile projectile)) {
                 continue;
             }
+            // The old position is the eye for a shot's first frames, and the renderer lerps from
+            // it, so the model is drawn across the lens. Testing the drawn box instead misses it:
+            // a take gated that way still had 18 frames of the arrow's texture filling the frame.
             // Only a projectile the client has just spawned: its old position is still the eye
-            // while its current position is already on its flight, and the renderer lerps from the
-            // old one. A projectile that has ticked is drawn where it really is.
+            // while its current position is already on its flight. A projectile that has ticked is
+            // drawn where it really is, and moving it would change the filmed arc.
             if (projectile.tickCount != 0 || projectile.oldPosition().distanceTo(eye) >= 1.0) {
                 continue;
             }
@@ -707,7 +710,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // with it so the lerp starts there. The server's projectile is untouched.
             Vec3 motion = projectile.getDeltaMovement();
             Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-            projectile.setPos(projectile.position().add(step));
+            projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
         }
     }
