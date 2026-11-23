@@ -112,10 +112,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Camera.java:106} in the 26.3 sources).
     private static final double NEAR_PLANE = 0.05;
 
-    /// The most of the frame one entity may cover. A player-shaped target four blocks from the
-    /// camera covers about a fifth of it; a body across the lens covers all of it. A take measured
-    /// at 0.5 had three frames of the dummy at 45.8% and two at about 30%, so the bound is the
-    /// fifth a target at its own distance covers.
+    /// The most of the frame one entity may cover. A player-shaped target at its own distance
+    /// covers a few per cent of it; a body across the lens covers all of it. A take measured at 0.5
+    /// had three frames of the dummy at 45.8% and two at about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
     /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
@@ -168,7 +167,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int COOLDOWN_TICKS = 4;
 
     /// Ticks a cooldown stage holds its picture. At {@link #COOLDOWN_TICK_RATE} ticks a second that
-    /// is six seconds, six refills of the accelerated delay and a fifth of the vanilla one.
+    /// is six seconds: nine refills of the accelerated 3.3-tick delay, and most of one of the
+    /// vanilla 33.3-tick delay.
     private static final int COOLDOWN_HOLD_TICKS = 30;
 
     /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
@@ -756,7 +756,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Fails a stage whose frame an entity fills more than half of.
+    /// Fails a stage whose frame an entity fills more than a quarter of.
     ///
     /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the end of every
     /// client tick, through the camera's own view and projection matrices. The box is clipped at
@@ -779,10 +779,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// take is a recording.
     private static void requireKeysOverlay(ClientGameTestContext context) {
         // Reflected, not imported: the gate builds against the published conventions jar, which has
-        // no InputOverlay, and a direct reference would not compile there. The class is present only
+        // no InputOverlay, and a direct reference would not compile there. The class is present
+        // only
         // in a build that draws the overlay, so its absence is the failure this check is for. A
         // plain GameTest run is not a recording, and the overlay draws only in one, so the check
         // applies to a take and passes in the gate's own run.
+        // The session class is in every conventions jar this test can build against, so its absence
+        // is a broken build, not a plain run. A plain run has the class and reports the session
+        // off.
         boolean recording =
                 context.computeOnClient(
                         _ -> {
@@ -792,8 +796,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                                 "io.github.brainage04.minecraftmodconventions"
                                                         + ".ClientGameTestRecordingSession");
                                 return (Boolean) session.getMethod("isEnabled").invoke(null);
-                            } catch (ReflectiveOperationException absent) {
-                                return false;
+                            } catch (ClassNotFoundException absent) {
+                                throw new AssertionError(
+                                        "Expected the client's conventions jar to have"
+                                                + " ClientGameTestRecordingSession",
+                                        absent);
+                            } catch (ReflectiveOperationException broken) {
+                                throw new AssertionError(
+                                        "Expected ClientGameTestRecordingSession.isEnabled to be"
+                                                + " readable",
+                                        broken);
                             }
                         });
         if (!recording) {
@@ -839,9 +851,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // (Camera.java:259-266 in the 26.3 sources). Its eye height is the smoothed
         // lerp(partialTick, eyeHeightOld, eyeHeight) (Camera.java:265), not getEyeHeight(); the
         // recording player stands still, so the two agree to within a hundredth of a block.
-        // Every partial tick a frame of the tick can be drawn at, not just 0: a body that is only
-        // across the lens partway through the tick is drawn there by the frame that lands on it.
-        // A take measured at 0 alone had one frame of the dummy filling the frame.
         {
             float partialTick = framePartialTick;
             Quaternionf rotation =
@@ -858,7 +867,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
             Vec3 eye = client.player.getEyePosition(partialTick);
             Vec3 forward = client.player.getViewVector(partialTick);
-            for (Entity entity : client.level.entitiesForRendering()) {}
             for (Entity entity : client.level.entitiesForRendering()) {
                 if (entity == client.player) {
                     continue;
@@ -1484,10 +1492,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// server synced, so a few ticks after the spear arrives it must accept the stab. With the
     /// vanilla delay it would refuse for 23 ticks.
     ///
-    /// <p>This is a check, not a stage: a spear's damage type is a bootstrap holder ({@code
-    /// Item.java:527}) and the connection's damage-type registry is the datapack one, so the server
-    /// cannot encode the hurt packet for a spear hit and the client never sees the swing land. The
-    /// stage would film a spear held in the air.
+    /// <p>This is a check, not a stage: a filmed spear stage showed the spear held in the air and
+    /// never the swing landing, so the gate is read here and the film does not show it. The cause
+    /// of the missing swing is not established.
     private static void requireSpearGate(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         String stage = "showcase.spear";
@@ -1621,8 +1628,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + caption);
         }
         // The cut keeps a stage up to its end marker, so a caption pushed on the marker's own tick
-        // is never drawn. The hold in finishHalf is what keeps it on screen, and this is what makes
-        // removing that hold fail.
+        // is never drawn. This is the gap from the last push to the marker: with the hold in
+        // finishHalf it is the hold, and with the hold removed it is 0 for a half that ran past
+        // HALF_TICKS, which is the bow half.
         int shown = serverTick - LAST_CAPTION_TICK;
         if (shown < MIN_LAST_CAPTION_TICKS) {
             throw new AssertionError(
