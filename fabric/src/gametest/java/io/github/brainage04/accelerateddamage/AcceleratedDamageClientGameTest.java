@@ -123,8 +123,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
 
-    /// The server tick the current half's last caption was pushed on, for
-    /// {@link #requireLastCaptionShown}.
+    /// The server tick the current half's last caption was pushed on, for {@link
+    /// #requireLastCaptionShown}.
     private static volatile int LAST_CAPTION_TICK;
 
     private static final int ARENA_Y = 64;
@@ -235,6 +235,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the bow
     /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
+
+    /// How many partial ticks a frame of one client tick is measured at, for {@link
+    /// #recordFrameCoverage}: 0, 1/4, 1/2, 3/4 and 1.
+    private static final int PARTIAL_TICK_STEPS = 4;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
     /// placed in a scene is a new entity on the client, its body built facing the rotation sent
@@ -764,40 +768,48 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // (Camera.java:259-266 in the 26.3 sources). Its eye height is the smoothed
         // lerp(partialTick, eyeHeightOld, eyeHeight) (Camera.java:265), not getEyeHeight(); the
         // recording player stands still, so the two agree to within a hundredth of a block.
-        float partialTick = 0.0F;
-        Quaternionf rotation =
-                new Quaternionf()
-                        .rotationYXZ(
-                                (float) Math.PI
-                                        - client.player.getViewYRot(partialTick)
-                                                * (float) (Math.PI / 180.0),
-                                -client.player.getViewXRot(partialTick) * (float) (Math.PI / 180.0),
-                                0.0F);
-        Matrix4f viewProjection =
-                new Matrix4f(projection)
-                        .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
-        Vec3 eye = client.player.getEyePosition(partialTick);
-        Vec3 forward = client.player.getViewVector(partialTick);
-        for (Entity entity : client.level.entitiesForRendering()) {
-            if (entity == client.player) {
-                continue;
-            }
-            double covered =
-                    screenCoverage(
-                            viewProjection,
-                            eye,
-                            forward,
-                            entity.getInterpolatedBoundingBox(partialTick));
-            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
-                LAST_FRAME_VIOLATION =
-                        String.format(
-                                Locale.ROOT,
-                                "%s at %s covers %.0f%% of the frame from the camera at %s",
-                                entity.getType(),
-                                entity.position(),
-                                covered * 100.0,
-                                eye);
-                return;
+        // Every partial tick a frame of the tick can be drawn at, not just 0: a body that is only
+        // across the lens partway through the tick is drawn there by the frame that lands on it.
+        // A take measured at 0 alone had one frame of the dummy filling the frame.
+        for (int step = 0; step <= PARTIAL_TICK_STEPS; step++) {
+            float partialTick = (float) step / PARTIAL_TICK_STEPS;
+            Quaternionf rotation =
+                    new Quaternionf()
+                            .rotationYXZ(
+                                    (float) Math.PI
+                                            - client.player.getViewYRot(partialTick)
+                                                    * (float) (Math.PI / 180.0),
+                                    -client.player.getViewXRot(partialTick)
+                                            * (float) (Math.PI / 180.0),
+                                    0.0F);
+            Matrix4f viewProjection =
+                    new Matrix4f(projection)
+                            .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
+            Vec3 eye = client.player.getEyePosition(partialTick);
+            Vec3 forward = client.player.getViewVector(partialTick);
+            for (Entity entity : client.level.entitiesForRendering()) {
+                if (entity == client.player) {
+                    continue;
+                }
+                double covered =
+                        screenCoverage(
+                                viewProjection,
+                                eye,
+                                forward,
+                                entity.getInterpolatedBoundingBox(partialTick));
+                if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
+                    LAST_FRAME_VIOLATION =
+                            String.format(
+                                    Locale.ROOT,
+                                    "%s at %s covers %.0f%% of the frame from the camera at %s"
+                                            + " (partial tick %.2f)",
+                                    entity.getType(),
+                                    entity.position(),
+                                    covered * 100.0,
+                                    eye,
+                                    partialTick);
+                    return;
+                }
             }
         }
     }
