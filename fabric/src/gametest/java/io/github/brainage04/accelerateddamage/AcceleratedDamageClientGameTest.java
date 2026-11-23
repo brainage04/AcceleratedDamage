@@ -714,10 +714,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             projectile.setPos(eye.add(step));
             projectile.setOldPosAndRot();
         }
-        // A target is teleported from its parking spot into the scene, and the client interpolates a
-        // player's move over two ticks (EntityTypes.java:1182 in the 26.3 sources), so the body is
-        // drawn along the line from the parking spot, which passes through the camera. The server's
-        // target is untouched; the client's copy has its old position snapped to where it is.
+        // A target is teleported from its parking spot into the scene, and the client
+        // interpolates a player's move over two ticks (EntityTypes.java:1182 in the 26.3
+        // sources), so the body is drawn along the line from the parking spot, which passes
+        // through the camera. The server's target is untouched; the client's copy has its old
+        // position snapped to where it is.
         for (Entity entity : client.level.entitiesForRendering()) {
             if (entity instanceof net.minecraft.world.entity.player.Player
                     && TRACKED.containsKey(entity.getUUID())) {
@@ -745,8 +746,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// Records the first entity coverage over the threshold in the frame this tick draws, for
-    /// {@link
-    /// #requireNoEntityFillsTheFrame}.
+    /// {@link #requireNoEntityFillsTheFrame}.
     private static void recordFrameCoverage(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
