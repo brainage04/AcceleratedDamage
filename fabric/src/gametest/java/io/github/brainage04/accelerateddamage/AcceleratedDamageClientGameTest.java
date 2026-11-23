@@ -120,8 +120,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// check, or null when no entity covered more than that.
     private static volatile String LAST_FRAME_VIOLATION;
 
-    /// The caption the current half pushed last, for {@link #requireLastCaptionShown}.
-    private static volatile LastCaption LAST_CAPTION;
+    /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
+    private static volatile Float LAST_CAPTION_HEALTH;
 
     private static final int ARENA_Y = 64;
     private static final double RANGE_X = -6.5D;
@@ -289,6 +289,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Map<String, Integer> DUMMIES = new LinkedHashMap<>();
 
     private static final Map<UUID, TrackedTarget> TRACKED = new LinkedHashMap<>();
+
+    /// The ids in {@link #TRACKED}, published for the client thread, which must not read the map
+    /// while the server thread changes it.
+    private static volatile Set<UUID> TRACKED_IDS = Set.of();
+
     private static boolean listenersRegistered;
 
     /// The game tick the server is on, set at the start of every server tick.
@@ -596,6 +601,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         context.waitTicks(4);
                     } finally {
                         TRACKED.clear();
+                        publishTrackedIds();
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
                 });
@@ -698,30 +704,31 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // while its current position is already on its flight, and the renderer lerps from the
             // old one. A projectile that has ticked is drawn where it really is, and moving it
             // would change the filmed arc. Testing the drawn box instead of the tick count misses
-            // the arrow: a take gated that way still had 18 frames of its texture filling the
-            // frame.
+            // the arrow: a take gated that way still drew it across the lens.
             if (projectile.tickCount != 0 || projectile.oldPosition().distanceTo(eye) >= 1.0) {
                 continue;
             }
             // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
             // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
             // nothing either, because the current position is the eye too. The client's copy's
-            // position and old position are both moved: it is
-            // moved a block along its own flight, and its old position with it so the lerp starts
-            // there. The server's projectile is untouched.
+            // position and old position are both moved: it is moved a block along its own flight,
+            // and its old position with it so the lerp starts there. The server's projectile is
+            // untouched.
             Vec3 motion = projectile.getDeltaMovement();
             Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-            projectile.setPos(eye.add(step));
+            projectile.setPos(projectile.position().add(step));
             projectile.setOldPosAndRot();
         }
-        // A target is teleported from its parking spot into the scene, and the client
-        // interpolates a player's move over two ticks (EntityTypes.java:1182 in the 26.3
-        // sources), so the body is drawn along the line from the parking spot, which passes
-        // through the camera. The server's target is untouched; the client's copy has its old
-        // position snapped to where it is.
+        // A pinned target is snapped back to its anchor every server tick, and a hit that moved it
+        // and was snapped back in the same tick reaches the client as two positions, which the
+        // client interpolates over two ticks (EntityTypes.java:1182 in the 26.3 sources). The line
+        // between them passes through the camera, so the body is drawn across the lens. The
+        // server's target is untouched; the client's copy has that interpolation cancelled and its
+        // old position snapped to where it is. A take without this had a frame of the dummy
+        // filling the frame; with it, none.
         for (Entity entity : client.level.entitiesForRendering()) {
             if (entity instanceof net.minecraft.world.entity.player.Player
-                    && TRACKED.containsKey(entity.getUUID())) {
+                    && TRACKED_IDS.contains(entity.getUUID())) {
                 entity.getInterpolation().cancel();
                 entity.setOldPosAndRot();
             }
@@ -730,12 +737,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Fails a stage whose frame an entity fills more than half of.
     ///
-    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the start of
-    /// every client tick, through the camera's own view and projection matrices. A box with a
-    /// corner behind the camera covers the whole screen, because part of it is drawn across the
-    /// near plane. The measurement runs after {@link #snapProjectilesOffTheCamera} in the same
-    /// tick, so it sees the frame that tick draws. The check runs at every stage marker and after
-    /// every shot, so a body across the lens fails the run instead of reaching the film.
+    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the end of every
+    /// client tick, through the camera's own view and projection matrices. The box is clipped at
+    /// the near plane first, so a body that straddles the plane is measured by what is drawn of it.
+    /// The measurement runs after {@link #snapProjectilesOffTheCamera} in the same tick, so it sees
+    /// the frame that tick draws. The check runs at every stage marker and after every shot, so a
+    /// body across the lens fails the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
         String violation = LAST_FRAME_VIOLATION;
         LAST_FRAME_VIOLATION = null;
@@ -761,7 +768,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         .mul(camera.getViewRotationMatrix(new Matrix4f()).invert());
         // The frame drawn right after a tick uses a partial tick near 0, and Camera.alignWithEntity
         // takes the rotation, the eye and the entity's box at that same partial tick
-        // (Camera.java:259-266 in the 26.3 sources).
+        // (Camera.java:259-266 in the 26.3 sources). Its eye height is the smoothed
+        // lerp(partialTick, eyeHeightOld, eyeHeight) (Camera.java:265), not getEyeHeight(); the
+        // recording player stands still, so the two agree to within a hundredth of a block.
         float partialTick = 0.0F;
         Quaternionf rotation =
                 new Quaternionf()
@@ -882,6 +891,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ServerPlayer target = server.getPlayerList().getPlayer(tracked.id());
             if (target == null || target.isRemoved()) {
                 TRACKED.remove(tracked.id());
+                publishTrackedIds();
                 continue;
             }
             if (FED.contains(target.getId())) {
@@ -1492,7 +1502,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int targetId,
             Consumer<MinecraftServer> prepare) {
         // Cleared so a half that never pushes a caption cannot be checked against the last half's.
-        LAST_CAPTION = null;
+        LAST_CAPTION_HEALTH = null;
         server.runOnServer(
                 current -> {
                     prepare.accept(current);
@@ -1510,30 +1520,27 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         float health = server.computeOnServer(current -> living(current, targetId).getHealth());
         ClientGameTestRecorder.showStep(
                 context, stage, title, label + ", health " + health(health));
-        LAST_CAPTION = new LastCaption(label, health);
+        LAST_CAPTION_HEALTH = health;
         requireNoEntityFillsTheFrame(stage);
     }
-
-    /// The caption a half pushed last.
-    private record LastCaption(String label, float health) {}
 
     /// Fails unless the half's last caption shows the last hit's health. The cut keeps a stage up
     /// to its end marker, so a caption pushed on the marker's own tick never reaches the film: the
     /// bow half's 14 shots at 3 ticks run 42 ticks, past {@link #HALF_TICKS}, and its last caption
     /// was cut from the take.
     private static void requireLastCaptionShown(String stage, HitLog log) {
-        LastCaption caption = LAST_CAPTION;
+        Float caption = LAST_CAPTION_HEALTH;
         if (caption == null) {
             throw new AssertionError("Expected " + stage + " to push a caption");
         }
-        if (Math.abs(caption.health() - log.finalHealth()) > 0.05F) {
+        if (Math.abs(caption - log.finalHealth()) > 0.05F) {
             throw new AssertionError(
                     "Expected the last caption of "
                             + stage
                             + " to show the last hit's health "
                             + log.finalHealth()
                             + ", it showed "
-                            + caption.health());
+                            + caption);
         }
         // The hold in finishHalf is what keeps the caption on screen, so there is nothing to
         // assert about its length here: the label and the health are what this check is for.
@@ -2603,6 +2610,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setCustomNameVisible(true);
         DUMMIES.put(name, target.getId());
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, PARKING));
+        publishTrackedIds();
+    }
+
+    /// Publishes the tracked ids for the client thread, which must not read {@link #TRACKED} while
+    /// the server thread changes it.
+    private static void publishTrackedIds() {
+        TRACKED_IDS = Set.copyOf(TRACKED.keySet());
     }
 
     /// An effect target: pinned in its cell with full effect-target health, facing the camera.
@@ -2630,6 +2644,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 0.0F,
                 false);
         TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, position));
+        publishTrackedIds();
         return id;
     }
 
@@ -2674,6 +2689,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     0.0F,
                     false);
             TRACKED.put(player.getUUID(), new TrackedTarget(player.getUUID(), name, PARKING));
+            publishTrackedIds();
         } else if (target != null) {
             target.discard();
         }
@@ -2682,6 +2698,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void restoreState(MinecraftServer server) {
         restoreRules(server);
         TRACKED.clear();
+        publishTrackedIds();
         hitLog = null;
         FED.clear();
         Objective air = server.getScoreboard().getObjective(AIR_OBJECTIVE);
