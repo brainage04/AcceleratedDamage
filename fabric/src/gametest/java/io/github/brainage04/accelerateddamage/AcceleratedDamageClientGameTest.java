@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientEntityEvents;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
@@ -129,7 +130,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// check, or null when no entity covered more than that.
     private static volatile String LAST_FRAME_VIOLATION;
 
-    /// The arrow's model, baked on the first frame that draws an arrow, for {@link #drawnFaces}.
+    /// The arrow's model, for {@link #arrowModel(Minecraft)}.
     private static ModelPart arrowModel;
 
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
@@ -658,9 +659,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
-        // Both ends of the client tick: a projectile's add-entity packet is applied before the
-        // tick starts, so a shot fired on the previous tick is at the camera at the start of this
-        // one, and the frame is drawn after the tick ends.
+        // A projectile's add-entity packet can be handled in a frame with no tick due (Minecraft.java
+        // 1156-1180 in the 26.3 sources), and that frame draws it at its spawn point, so it is
+        // snapped as the client adds it. The tick hooks catch one still at the camera after a tick: a
+        // splash potion moves half a block a tick. Both ends of the tick, because the frame is drawn
+        // after the tick ends.
+        ClientEntityEvents.ENTITY_LOAD.register(
+                (entity, _) -> {
+                    if (entity instanceof Projectile projectile) {
+                        snapOffTheCamera(Minecraft.getInstance(), projectile);
+                    }
+                });
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
                 .register(AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
@@ -699,52 +708,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-    /// Snaps a projectile's old position forward when it is still at the camera.
-    ///
-    /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
-    /// the 26.3 sources), and in first person the camera sits at that eye. The renderer draws an
-    /// entity at the position lerped from its old position to its current one ({@code
-    /// EntityRenderer.java:163-165}), and the old position is the spawn point until the entity's
-    /// first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the first frame of every
-    /// shot draws the arrow across the near plane: a wall of its texture. The server's arrow is
-    /// untouched; the client's copy has its position and its old position both moved, so the lerp
-    /// starts where the arrow already is.
+    /// Snaps the recording player's projectiles off the camera, and puts every target's client copy
+    /// back on its anchor.
     private static void snapProjectilesOffTheCamera(Minecraft client) {
         if (client.level == null || client.player == null) {
             return;
         }
 
-        Vec3 eye = client.player.getEyePosition();
         for (Entity entity : client.level.entitiesForRendering()) {
-            if (!(entity instanceof Projectile projectile)) {
-                continue;
+            if (entity instanceof Projectile projectile) {
+                snapOffTheCamera(client, projectile);
             }
-            // The condition is the frame itself: the box the renderer draws for this projectile,
-            // lerped from its old position, contains the eye. A tick count is not enough: a splash
-            // potion thrown from the eye moves half a block a tick and is still drawn across the
-            // lens on its second tick.
-            if (!projectile.getInterpolatedBoundingBox(0.0F).contains(eye)) {
-                continue;
-            }
-            // Only the recording player's own shots: a projectile another entity spawned at the eye
-            // is not this film's, and moving it would change what the take shows.
-            if (projectile.getOwner() != client.player) {
-                continue;
-            }
-            // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
-            // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
-            // nothing either, because the current position is the eye too. The client's copy's
-            // position and old position are both moved: it is moved a block along its own flight,
-            // and its old position with it so the lerp starts there. The server's projectile is
-            // untouched.
-            Vec3 motion = projectile.getDeltaMovement();
-            Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-            // Stepped from the eye, not from the projectile's own position: the two differ by the
-            // 0.1 the arrow spawns below the eye (AbstractArrow.java:123), and a copy placed at its
-            // own position is still drawn across the lens. A take stepped that way had 17 frames
-            // of the dummy filling the frame; stepped from the eye, none.
-            projectile.setPos(eye.add(step));
-            projectile.setOldPosAndRot();
         }
         // A target's model is drawn at the position lerped from its old position
         // (EntityRenderer.java:163-165 in the 26.3 sources). The client's copy of a target that was
@@ -765,6 +739,66 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             player.setPos(anchor.x, anchor.y, anchor.z);
             player.setOldPosAndRot();
         }
+    }
+
+    /// Moves the client's copy of one of the recording player's projectiles forward along its
+    /// flight while its model still reaches the lens.
+    ///
+    /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
+    /// the 26.3 sources), and in first person the camera sits at that eye. The renderer draws an
+    /// entity at the position lerped from its old position to its current one ({@code
+    /// EntityRenderer.java:163-165}), and the old position is the spawn point until the entity's
+    /// first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so every frame before that
+    /// tick draws the arrow across the near plane: a wall of its texture. The arrow's model reaches
+    /// back from its position ({@code ArrowModel.java:23-31}), so the copy is put a block plus that
+    /// reach ahead of the eye, and its tail is a block ahead. The server's projectile is untouched.
+    private static void snapOffTheCamera(Minecraft client, Projectile projectile) {
+        // Only the recording player's own shots: a projectile another entity spawned at the eye is
+        // not this film's, and moving it would change what the take shows.
+        if (client.player == null || projectile.getOwner() != client.player) {
+            return;
+        }
+        Vec3 eye = client.player.getEyePosition();
+        double clearance = 1.0 + reachBehind(client, projectile);
+        // Measured from the old position, where the next frame starts drawing it.
+        if (projectile.getPosition(0.0F).distanceTo(eye) >= clearance) {
+            return;
+        }
+        // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
+        // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
+        // nothing either, because the current position is the eye too. The client's copy's
+        // position and old position are both moved along its own flight, so the lerp starts there.
+        Vec3 motion = projectile.getDeltaMovement();
+        Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
+        // Stepped from the eye, not from the projectile's own position: the two differ by the
+        // 0.1 the arrow spawns below the eye (AbstractArrow.java:123), and a copy placed at its
+        // own position is still drawn across the lens. A take stepped that way had 17 frames
+        // of the dummy filling the frame; stepped from the eye, none.
+        projectile.setPos(eye.add(step.scale(clearance)));
+        projectile.setOldPosAndRot();
+    }
+
+    /// How far behind its position the renderer draws an entity: an arrow's tail, read from the
+    /// arrow's own model, or nothing for any other entity, which is drawn inside its box.
+    private static double reachBehind(Minecraft client, Entity entity) {
+        if (!(client.getEntityRenderDispatcher().getRenderer(entity)
+                instanceof ArrowRenderer<?, ?>)) {
+            return 0.0;
+        }
+        // The model's length runs along its x axis, with the tail on the negative side
+        // (ArrowModel.java:23-28).
+        double[] tail = {0.0};
+        arrowModel(client)
+                .getExtentsForGui(new PoseStack(), point -> tail[0] = Math.min(tail[0], point.x()));
+        return -tail[0];
+    }
+
+    /// The arrow's model as {@code ArrowRenderer} draws it, baked on first use.
+    private static ModelPart arrowModel(Minecraft client) {
+        if (arrowModel == null) {
+            arrowModel = client.getEntityModels().bakeLayer(ModelLayers.ARROW);
+        }
+        return arrowModel;
     }
 
     /// Fails a stage whose frame an entity fills more than a quarter of.
@@ -897,15 +931,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Vec3 offset = entity.getPosition(partialTick).subtract(eye);
         List<Vec3[]> faces = new ArrayList<>();
         if (client.getEntityRenderDispatcher().getRenderer(entity) instanceof ArrowRenderer<?, ?>) {
-            if (arrowModel == null) {
-                arrowModel = client.getEntityModels().bakeLayer(ModelLayers.ARROW);
-            }
             // ArrowRenderer.submit's own pose (ArrowRenderer.java:23-25).
             PoseStack pose = new PoseStack();
             pose.translate(offset.x, offset.y, offset.z);
             pose.rotateDegrees(Axis.YP, entity.getYRot(partialTick) - 90.0F);
             pose.rotateDegrees(Axis.ZP, entity.getXRot(partialTick));
-            arrowModel.visit(
+            arrowModel(client).visit(
                     pose,
                     (part, _, _, cube) -> {
                         for (ModelPart.Polygon polygon : cube.polygons) {
