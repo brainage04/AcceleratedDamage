@@ -942,8 +942,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Records the first entity coverage over the threshold in a drawn frame, for {@link
     /// #requireNoEntityFillsTheFrame}.
     ///
-    /// <p>Measures the render states the frame draws, after the frame's entities are extracted
-    /// with the camera already aligned for that frame ({@code GameRenderer.update} before {@code
+    /// <p>Measures the render states the frame draws, after the frame's entities are extracted with
+    /// the camera already aligned for that frame ({@code GameRenderer.update} before {@code
     /// GameRenderer.extract}, {@code Minecraft.java:1277-1282} in the 26.3 sources). Frames are
     /// drawn between ticks too: the client handles its packets every frame and ticks only when a
     /// tick is due ({@code Minecraft.java:1156-1180}), so a projectile added or moved by a packet
