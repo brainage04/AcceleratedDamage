@@ -2,6 +2,7 @@ package io.github.brainage04.accelerateddamage;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
@@ -45,9 +46,12 @@ import net.minecraft.client.Options;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.renderer.entity.state.ArrowRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.entity.state.ThrownTridentRenderState;
+import net.minecraft.client.renderer.state.level.ParticleGroupRenderState;
+import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -76,6 +80,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -667,6 +672,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 .register(AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
+                .register(AcceleratedDamageClientGameTest::dropOwnCritTrails);
         LevelExtractionEvents.END_EXTRACTION.register(
                 context -> {
                     hideProjectilesAtTheLens(context);
@@ -702,6 +709,32 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     return true;
                 });
         listenersRegistered = true;
+    }
+
+    /// Clears the crit flag on the client's copies of the recording player's own arrows, so they
+    /// leave no crit trail.
+    ///
+    /// <p>A full-power bow shot and a player's crossbow shot are crit arrows ({@code
+    /// BowItem.java:41}, {@code CrossbowItem.java:184}, {@code ProjectileWeaponItem.java:96-100} in
+    /// the 26.3 sources), and the client's copy spawns four crit particles a tick along its path,
+    /// starting where it was before the tick ({@code AbstractArrow.java:226-238}). Each flies back
+    /// along the arrow's path at 0.4 of its speed with a friction of 0.7 ({@code
+    /// CritParticle.java:20-28}), about four blocks for a full-power shot, so the trail of an arrow
+    /// shot from the camera flies through the lens: the tan squares that filled the bow and
+    /// crossbow stages. The server's arrow keeps its flag, so the damage is the game's own; only
+    /// the film's own arrows lose their trail. Run before the client's tick, where the particles
+    /// are spawned, and after the packets that may set the flag again.
+    private static void dropOwnCritTrails(Minecraft client) {
+        if (client.level == null || client.player == null) {
+            return;
+        }
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (entity instanceof AbstractArrow arrow
+                    && arrow.isCritArrow()
+                    && arrow.getOwner() == client.player) {
+                arrow.setCritArrow(false);
+            }
+        }
     }
 
     /// Puts every target's client copy back on its anchor.
@@ -888,15 +921,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Records the first entity coverage over the threshold in a drawn frame, for {@link
-    /// #requireNoEntityFillsTheFrame}.
+    /// Records the first entity or particle coverage over the threshold in a drawn frame, for
+    /// {@link #requireNoEntityFillsTheFrame}.
     ///
-    /// <p>Measures the render states the frame draws, after the frame's entities are extracted with
-    /// the camera already aligned for that frame ({@code GameRenderer.update} before {@code
-    /// GameRenderer.extract}, {@code Minecraft.java:1277-1282} in the 26.3 sources). Frames are
-    /// drawn between ticks too: the client handles its packets every frame and ticks only when a
-    /// tick is due ({@code Minecraft.java:1156-1180}), so a projectile added or moved by a packet
-    /// is drawn before any tick hook can see it.
+    /// <p>Measures the render states the frame draws, after the frame's entities and particles are
+    /// extracted with the camera already aligned for that frame ({@code GameRenderer.update} before
+    /// {@code GameRenderer.extract}, {@code Minecraft.java:1277-1282} in the 26.3 sources;
+    /// particles at {@code LevelExtractor.java:214}). Frames are drawn between ticks too: the
+    /// client handles its packets every frame and ticks only when a tick is due ({@code
+    /// Minecraft.java:1156-1180}), so a projectile added or moved by a packet is drawn before any
+    /// tick hook can see it.
     private static void recordFrameCoverage(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
         Camera camera = context.camera();
@@ -919,6 +953,83 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 eye);
                 return;
             }
+        }
+        // A particle's quad is extracted relative to the camera (SingleQuadParticle.java:66-69),
+        // and buildLayer hands out the four corners the renderer draws.
+        QuadCorners corners = new QuadCorners();
+        for (ParticleGroupRenderState group : context.levelState().particlesRenderState.particles) {
+            if (group instanceof QuadParticleRenderState quads) {
+                for (SingleQuadParticle.Layer layer : quads.layers()) {
+                    quads.buildLayer(layer, corners);
+                }
+            }
+        }
+        for (int first = 0; first + 3 < corners.points.size(); first += 4) {
+            List<Vec3[]> quad =
+                    List.<Vec3[]>of(corners.points.subList(first, first + 4).toArray(Vec3[]::new));
+            double covered = screenCoverage(viewProjection, forward, quad);
+            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
+                LAST_FRAME_VIOLATION =
+                        String.format(
+                                Locale.ROOT,
+                                "a particle at %s covers %.0f%% of the frame from the camera at %s",
+                                corners.points.get(first),
+                                covered * 100.0,
+                                eye);
+                return;
+            }
+        }
+    }
+
+    /// Collects the corners of the particle quads {@code QuadParticleRenderState.buildLayer} draws
+    /// ({@code QuadParticleRenderState.java:85-108} in the 26.3 sources), four to a quad.
+    private static final class QuadCorners implements VertexConsumer {
+        private final List<Vec3> points = new ArrayList<>();
+
+        @Override
+        public VertexConsumer addVertex(float x, float y, float z) {
+            points.add(new Vec3(x, y, z));
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setColor(int r, int g, int b, int a) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setColor(int color) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv(float u, float v) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv1(int u, int v) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv2(int u, int v) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv3(float u, float v) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setNormal(float x, float y, float z) {
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setLineWidth(float width) {
+            return this;
         }
     }
 
