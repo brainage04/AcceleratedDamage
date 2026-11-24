@@ -29,7 +29,6 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientEntityEvents;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
@@ -46,9 +45,6 @@ import net.minecraft.client.Options;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.geom.ModelPart;
-import net.minecraft.client.renderer.entity.ArrowRenderer;
-import net.minecraft.client.renderer.entity.EntityRenderer;
-import net.minecraft.client.renderer.entity.ThrownTridentRenderer;
 import net.minecraft.client.renderer.entity.state.ArrowRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.entity.state.ThrownTridentRenderState;
@@ -665,21 +661,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
-        // A projectile's add-entity packet can be handled in a frame with no tick due
-        // (Minecraft.java:1156-1180 in the 26.3 sources), and that frame draws it at its spawn
-        // point, so it is snapped as the client adds it. The tick hooks catch one still at the
-        // camera after a tick: a splash potion moves half a block a tick. Both ends of the tick,
-        // because the frame is drawn after the tick ends.
-        ClientEntityEvents.ENTITY_LOAD.register(
-                (entity, _) -> {
-                    if (entity instanceof Projectile projectile) {
-                        snapOffTheCamera(Minecraft.getInstance(), projectile);
-                    }
-                });
+        // Both ends of the client tick: a target moved by a packet before the tick is put back
+        // before the tick, and the frame is drawn after the tick ends.
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
-                .register(AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
+                .register(AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
-                AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
+                AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
         LevelExtractionEvents.END_EXTRACTION.register(
                 context -> {
                     hideProjectilesAtTheLens(context);
@@ -717,25 +704,19 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-    /// Snaps the recording player's projectiles off the camera, and puts every target's client copy
-    /// back on its anchor.
-    private static void snapProjectilesOffTheCamera(Minecraft client) {
-        if (client.level == null || client.player == null) {
+    /// Puts every target's client copy back on its anchor.
+    ///
+    /// <p>A target's model is drawn at the position lerped from its old position ({@code
+    /// EntityRenderer.java:163-165} in the 26.3 sources). The client's copy of a target that was
+    /// teleported into the scene interpolates from where it was, and the line it is drawn along
+    /// passes through the camera, so the body fills the frame. Cancelling the interpolation alone
+    /// is not enough: it freezes the copy wherever the interpolation had already moved it, which
+    /// can be at the camera. The copy is put back on the anchor the server pins it to, and its old
+    /// position with it, so the lerp is a point. The server's target is untouched.
+    private static void pinTargetsToTheirAnchors(Minecraft client) {
+        if (client.level == null) {
             return;
         }
-
-        for (Entity entity : client.level.entitiesForRendering()) {
-            if (entity instanceof Projectile projectile) {
-                snapOffTheCamera(client, projectile);
-            }
-        }
-        // A target's model is drawn at the position lerped from its old position
-        // (EntityRenderer.java:163-165 in the 26.3 sources). The client's copy of a target that was
-        // teleported into the scene interpolates from where it was, and the line it is drawn along
-        // passes through the camera, so the body fills the frame. Cancelling the interpolation
-        // alone is not enough: it freezes the copy wherever the interpolation had already moved it,
-        // which can be at the camera. The copy is put back on the anchor the server pins it to, and
-        // its old position with it, so the lerp is a point. The server's target is untouched.
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof net.minecraft.world.entity.player.Player player)) {
                 continue;
@@ -750,74 +731,42 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Snaps the client's copy of one of the recording player's projectiles a block forward when
-    /// the box the renderer draws it in holds the camera.
+    /// Leaves out of a frame every projectile that comes within a block of the camera.
     ///
-    /// <p>A projectile shot by the player spawns at or just below its eye ({@code
-    /// AbstractArrow.java:123} in the 26.3 sources), and in first person the camera sits at that
-    /// eye. The renderer draws an entity at the position lerped from its old position to its
-    /// current one ({@code EntityRenderer.java:163-165}), and the old position is the spawn point
-    /// until the entity's first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the
-    /// first frames of every shot draw the projectile across the near plane. The server's
-    /// projectile is untouched. An arrow or a trident is left where it is and kept out of the frame
-    /// by {@link #hideProjectilesAtTheLens} instead.
-    private static void snapOffTheCamera(Minecraft client, Projectile projectile) {
-        // Only the recording player's own shots: a projectile another entity spawned at the eye is
-        // not this film's, and moving it would change what the take shows.
-        if (client.player == null || projectile.getOwner() != client.player) {
-            return;
-        }
-        EntityRenderer<?, ?> renderer = client.getEntityRenderDispatcher().getRenderer(projectile);
-        if (renderer instanceof ArrowRenderer<?, ?> || renderer instanceof ThrownTridentRenderer) {
-            return;
-        }
-        Vec3 eye = client.player.getEyePosition();
-        // The condition is the frame itself: the box the renderer draws for this projectile,
-        // lerped from its old position, contains the eye. A tick count is not enough: a splash
-        // potion thrown from the eye moves half a block a tick and is still drawn across the lens
-        // on its second tick.
-        if (!projectile.getInterpolatedBoundingBox(0.0F).contains(eye)) {
-            return;
-        }
-        // Moving only the old position does nothing, because the current position is the eye too.
-        // The client's copy's position and old position are both moved a block along its own
-        // flight, so the lerp starts there.
-        Vec3 motion = projectile.getDeltaMovement();
-        Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
-        // Stepped from the eye, not from the projectile's own position: the two differ by the
-        // 0.1 the arrow spawns below the eye (AbstractArrow.java:123), and a copy placed at its
-        // own position is still drawn across the lens. A take stepped that way had 17 frames
-        // of the dummy filling the frame; stepped from the eye, none.
-        projectile.setPos(eye.add(step));
-        projectile.setOldPosAndRot();
-    }
-
-    /// Leaves out of a frame every arrow and trident whose model comes within a block of the
-    /// camera.
-    ///
-    /// <p>An arrow spawns at its shooter's eye less 0.1 ({@code AbstractArrow.java:123} in the 26.3
-    /// sources), and so does a trident, which is an arrow ({@code ThrownTrident.java:31,43-44});
-    /// the first-person camera sits at that eye. An arrow's model reaches 0.68 of a block behind
-    /// its position ({@code ArrowModel.java:23-31}) and a trident's 1.69, its 27-pixel pole ({@code
-    /// TridentModel.java:24}), so the first frames of a shot draw the tail across the lens as flat
-    /// squares of its texture. Moving the client's copy forward does not hold: a take had the
-    /// server's position update put a bow arrow back a third of a block ahead of the eye before its
-    /// first client tick, and another drew a trident at its spawn point. Vanilla leaves a thrown
-    /// projectile out of the frame the same way for its first two ticks within 3.5 blocks ({@code
-    /// ThrowableProjectile.java:24-27}); an arrow and a trident have no such rule. Each is drawn
-    /// from the first frame its whole model is a block from the camera.
+    /// <p>The player's shots spawn at its eye: an arrow, and a trident, which is an arrow, at the
+    /// eye less 0.1 ({@code AbstractArrow.java:123} and {@code ThrownTrident.java:31,43-44} in the
+    /// 26.3 sources), a firework from a crossbow at the eye less 0.15 ({@code
+    /// CrossbowItem.java:155}), and the first-person camera sits at that eye. Until its first tick
+    /// the client draws it there, and a frame can be drawn before that tick: the client handles its
+    /// packets every frame and ticks only when a tick is due ({@code Minecraft.java:1156-1180}). An
+    /// arrow's model also reaches 0.68 of a block behind its position ({@code
+    /// ArrowModel.java:23-31}) and a trident's 1.69, its 27-pixel pole ({@code
+    /// TridentModel.java:24}), so a slow arrow's tail stays at the lens for ticks. Each draws as
+    /// flat squares of its texture across the frame. Moving the client's copy forward does not
+    /// hold: in takes the server's position update put a bow arrow back a third of a block ahead of
+    /// the eye, and a trident and a firework were drawn at their spawn points despite the move.
+    /// Vanilla leaves a thrown projectile out of the frame the same way for its first two ticks
+    /// within 3.5 blocks ({@code ThrowableProjectile.java:24-27}); other projectiles have no such
+    /// rule. Each is drawn from the first frame all it draws is a block from the camera.
     private static void hideProjectilesAtTheLens(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
         Vec3 eye = context.camera().position();
+        // A render state names its entity's type but not its class, so the projectile types are
+        // read from the level's own entities.
+        Set<EntityType<?>> projectiles = new HashSet<>();
+        for (Entity entity : context.level().entitiesForRendering()) {
+            if (entity instanceof Projectile) {
+                projectiles.add(entity.getType());
+            }
+        }
         context.levelState()
                 .entityRenderStates
                 .removeIf(
                         state -> {
-                            List<Vec3[]> faces = modelFaces(client, state, eye);
-                            if (faces == null) {
+                            if (!projectiles.contains(state.entityType)) {
                                 return false;
                             }
-                            for (Vec3[] face : faces) {
+                            for (Vec3[] face : drawnFaces(client, state, eye)) {
                                 for (Vec3 point : face) {
                                     if (point.lengthSqr() < 1.0) {
                                         return true;
