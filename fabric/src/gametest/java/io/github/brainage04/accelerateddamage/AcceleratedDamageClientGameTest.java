@@ -45,6 +45,8 @@ import net.minecraft.client.Options;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.renderer.entity.ArrowRenderer;
+import net.minecraft.client.renderer.entity.state.ArrowRenderState;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -84,7 +86,6 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
@@ -659,11 +660,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
         ServerTickEvents.START_SERVER_TICK.register(
                 AcceleratedDamageClientGameTest::tickTrackedTargets);
-        // A projectile's add-entity packet can be handled in a frame with no tick due (Minecraft.java
-        // 1156-1180 in the 26.3 sources), and that frame draws it at its spawn point, so it is
-        // snapped as the client adds it. The tick hooks catch one still at the camera after a tick: a
-        // splash potion moves half a block a tick. Both ends of the tick, because the frame is drawn
-        // after the tick ends.
+        // A projectile's add-entity packet can be handled in a frame with no tick due
+        // (Minecraft.java:1156-1180 in the 26.3 sources), and that frame draws it at its spawn
+        // point, so it is snapped as the client adds it. The tick hooks catch one still at the
+        // camera after a tick: a splash potion moves half a block a tick. Both ends of the tick,
+        // because the frame is drawn after the tick ends.
         ClientEntityEvents.ENTITY_LOAD.register(
                 (entity, _) -> {
                     if (entity instanceof Projectile projectile) {
@@ -675,7 +676,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         LevelExtractionEvents.END_EXTRACTION.register(
-                AcceleratedDamageClientGameTest::recordFrameCoverage);
+                context -> {
+                    hideArrowsAtTheLens(context);
+                    recordFrameCoverage(context);
+                });
         AttackEntityCallback.EVENT.register(
                 (player, level, hand, entity, hitResult) -> {
                     HitLog log = hitLog;
@@ -741,52 +745,74 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Moves the client's copy of one of the recording player's projectiles forward along its
-    /// flight while its model still reaches the lens.
+    /// Snaps the client's copy of one of the recording player's projectiles a block forward when
+    /// the box the renderer draws it in holds the camera.
     ///
-    /// <p>An arrow spawns at its shooter's eye height less 0.1 ({@code AbstractArrow.java:123} in
-    /// the 26.3 sources), and in first person the camera sits at that eye. The renderer draws an
-    /// entity at the position lerped from its old position to its current one ({@code
-    /// EntityRenderer.java:163-165}), and the old position is the spawn point until the entity's
-    /// first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so every frame before that
-    /// tick draws the arrow across the near plane: a wall of its texture. The arrow's model reaches
-    /// back from its position ({@code ArrowModel.java:23-31}), so the copy is put a block plus that
-    /// reach ahead of the eye, and its tail is a block ahead. The server's projectile is untouched.
+    /// <p>A projectile shot by the player spawns at or just below its eye ({@code
+    /// AbstractArrow.java:123} in the 26.3 sources), and in first person the camera sits at that
+    /// eye. The renderer draws an entity at the position lerped from its old position to its
+    /// current one ({@code EntityRenderer.java:163-165}), and the old position is the spawn point
+    /// until the entity's first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the
+    /// first frames of every shot draw the projectile across the near plane. The server's
+    /// projectile is untouched. An arrow is left where it is and kept out of the frame by {@link
+    /// #hideArrowsAtTheLens} instead.
     private static void snapOffTheCamera(Minecraft client, Projectile projectile) {
         // Only the recording player's own shots: a projectile another entity spawned at the eye is
         // not this film's, and moving it would change what the take shows.
-        if (client.player == null || projectile.getOwner() != client.player) {
+        if (client.player == null
+                || projectile.getOwner() != client.player
+                || client.getEntityRenderDispatcher().getRenderer(projectile)
+                        instanceof ArrowRenderer<?, ?>) {
             return;
         }
         Vec3 eye = client.player.getEyePosition();
-        double clearance = 1.0 + reachBehind(client, projectile);
-        // Measured from the old position, where the next frame starts drawing it.
-        if (projectile.getPosition(0.0F).distanceTo(eye) >= clearance) {
+        // The condition is the frame itself: the box the renderer draws for this projectile,
+        // lerped from its old position, contains the eye. A tick count is not enough: a splash
+        // potion thrown from the eye moves half a block a tick and is still drawn across the lens
+        // on its second tick.
+        if (!projectile.getInterpolatedBoundingBox(0.0F).contains(eye)) {
             return;
         }
-        // Hiding the arrow does nothing: ArrowRenderer never reads isInvisible
-        // (ArrowRenderer.java:20-31 in the 26.3 sources). Moving only the old position does
-        // nothing either, because the current position is the eye too. The client's copy's
-        // position and old position are both moved along its own flight, so the lerp starts there.
+        // Moving only the old position does nothing, because the current position is the eye too.
+        // The client's copy's position and old position are both moved a block along its own
+        // flight, so the lerp starts there.
         Vec3 motion = projectile.getDeltaMovement();
         Vec3 step = motion.lengthSqr() < 1.0E-4 ? new Vec3(0.0, 0.0, 1.0) : motion.normalize();
         // Stepped from the eye, not from the projectile's own position: the two differ by the
         // 0.1 the arrow spawns below the eye (AbstractArrow.java:123), and a copy placed at its
         // own position is still drawn across the lens. A take stepped that way had 17 frames
         // of the dummy filling the frame; stepped from the eye, none.
-        projectile.setPos(eye.add(step.scale(clearance)));
+        projectile.setPos(eye.add(step));
         projectile.setOldPosAndRot();
     }
 
-    /// How far behind its position the renderer draws an entity: an arrow's tail, read from the
-    /// arrow's own model, or nothing for any other entity, which is drawn inside its box.
-    private static double reachBehind(Minecraft client, Entity entity) {
-        if (!(client.getEntityRenderDispatcher().getRenderer(entity)
-                instanceof ArrowRenderer<?, ?>)) {
-            return 0.0;
-        }
-        // The model's length runs along its x axis, with the tail on the negative side
-        // (ArrowModel.java:23-28).
+    /// Leaves out of a frame every arrow whose model reaches within a block of the camera.
+    ///
+    /// <p>An arrow spawns at its shooter's eye less 0.1 ({@code AbstractArrow.java:123} in the
+    /// 26.3 sources), where the first-person camera sits, and its model reaches 0.68 of a block
+    /// behind its position ({@code ArrowModel.java:23-31}), so the first frames of a shot draw its
+    /// tail and shaft across the lens as flat squares of its texture. Moving the client's copy
+    /// forward does not hold: the server's position update puts it back where the server's arrow
+    /// is, which after one tick of a bow drawn for three ticks is a third of a block ahead. Vanilla
+    /// leaves a thrown projectile out of the frame the same way for its first two ticks within 3.5
+    /// blocks ({@code ThrowableProjectile.java:24-27}); an arrow has no such rule. The arrow is
+    /// drawn from the first frame its tail is a block ahead of the camera.
+    private static void hideArrowsAtTheLens(LevelExtractionContext context) {
+        Vec3 eye = context.camera().position();
+        double clearance = 1.0 + arrowTailReach(Minecraft.getInstance());
+        context.levelState()
+                .entityRenderStates
+                .removeIf(
+                        state ->
+                                state instanceof ArrowRenderState
+                                        && eye.distanceToSqr(state.x, state.y, state.z)
+                                                < clearance * clearance);
+    }
+
+    /// How far behind its position the renderer draws an arrow, read from the arrow's own model:
+    /// its length runs along the model's x axis, with the tail on the negative side ({@code
+    /// ArrowModel.java:23-28} in the 26.3 sources).
+    private static double arrowTailReach(Minecraft client) {
         double[] tail = {0.0};
         arrowModel(client)
                 .getExtentsForGui(new PoseStack(), point -> tail[0] = Math.min(tail[0], point.x()));
@@ -803,10 +829,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Fails a stage whose frame an entity fills more than a quarter of.
     ///
-    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, in every frame it
-    /// draws, through that frame's own camera and partial tick. The check runs at every stage
-    /// marker and after every shot, so a body across the lens fails the run instead of reaching the
-    /// film.
+    /// <p>{@link #recordFrameCoverage} measures the render states of every frame the client draws.
+    /// The check runs at every stage marker and after every shot, so a body across the lens fails
+    /// the run instead of reaching the film.
     private static void requireNoEntityFillsTheFrame(String stage) {
         String violation = LAST_FRAME_VIOLATION;
         LAST_FRAME_VIOLATION = null;
@@ -873,69 +898,50 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Records the first entity coverage over the threshold in a drawn frame, for {@link
     /// #requireNoEntityFillsTheFrame}.
     ///
-    /// <p>Runs after the frame's entities are extracted for drawing, with the camera already
-    /// aligned for that frame ({@code GameRenderer.update} before {@code GameRenderer.extract},
-    /// {@code Minecraft.java:1277-1282} in the 26.3 sources). Frames are drawn between ticks too: the
-    /// client handles its packets every frame and ticks only when a tick is due ({@code
-    /// Minecraft.java:1156-1180}), so a projectile added by a packet is drawn at its spawn point
-    /// before any tick hook can see it.
+    /// <p>Measures the render states the frame draws, after the frame's entities are extracted
+    /// with the camera already aligned for that frame ({@code GameRenderer.update} before {@code
+    /// GameRenderer.extract}, {@code Minecraft.java:1277-1282} in the 26.3 sources). Frames are
+    /// drawn between ticks too: the client handles its packets every frame and ticks only when a
+    /// tick is due ({@code Minecraft.java:1156-1180}), so a projectile added or moved by a packet
+    /// is drawn before any tick hook can see it.
     private static void recordFrameCoverage(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
-        if (client.player == null) {
-            return;
-        }
         Camera camera = context.camera();
-        // The partial tick entities are extracted with (GameRenderer.java:441).
-        float partialTick = context.deltaTracker().getGameTimeDeltaPartialTick(false);
         Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
         Vec3 eye = camera.position();
         Vector3fc forward = camera.forwardVector();
-        for (Entity entity : context.level().entitiesForRendering()) {
-            if (entity == client.player
-                    || !client.getEntityRenderDispatcher()
-                            .shouldRender(
-                                    entity,
-                                    camera.getCullFrustum(),
-                                    eye.x,
-                                    eye.y,
-                                    eye.z,
-                                    partialTick)) {
-                continue;
-            }
+        for (EntityRenderState state : context.levelState().entityRenderStates) {
             double covered =
-                    screenCoverage(
-                            viewProjection, forward, drawnFaces(client, entity, partialTick, eye));
+                    screenCoverage(viewProjection, forward, drawnFaces(client, state, eye));
             if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
                 LAST_FRAME_VIOLATION =
                         String.format(
                                 Locale.ROOT,
-                                "%s (tick %d) at %s covers %.0f%% of the frame from the camera at"
-                                        + " %s (partial tick %.2f)",
-                                entity.getType(),
-                                entity.tickCount,
-                                entity.getPosition(partialTick).subtract(eye),
+                                "%s (age %.2f ticks) at %s covers %.0f%% of the frame from the"
+                                        + " camera at %s",
+                                state.entityType,
+                                state.ageInTicks,
+                                new Vec3(state.x, state.y, state.z).subtract(eye),
                                 covered * 100.0,
-                                eye,
-                                partialTick);
+                                eye);
                 return;
             }
         }
     }
 
-    /// The faces the renderer draws for an entity, relative to the camera. An arrow is measured by
-    /// its own model: the model reaches 0.68 of a block behind the arrow's position ({@code
-    /// ArrowModel.java:23-31} in the 26.3 sources), so its box misses the tail drawn at the lens.
-    /// Any other entity is measured by its box.
-    private static List<Vec3[]> drawnFaces(
-            Minecraft client, Entity entity, float partialTick, Vec3 eye) {
-        Vec3 offset = entity.getPosition(partialTick).subtract(eye);
+    /// The faces the renderer draws for a render state, relative to the camera. An arrow is
+    /// measured by its own model: the model reaches 0.68 of a block behind the arrow's position
+    /// ({@code ArrowModel.java:23-31} in the 26.3 sources), so its box misses the tail drawn at the
+    /// lens. Any other entity is measured by its box.
+    private static List<Vec3[]> drawnFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
+        Vec3 offset = new Vec3(state.x, state.y, state.z).subtract(eye);
         List<Vec3[]> faces = new ArrayList<>();
-        if (client.getEntityRenderDispatcher().getRenderer(entity) instanceof ArrowRenderer<?, ?>) {
+        if (state instanceof ArrowRenderState arrow) {
             // ArrowRenderer.submit's own pose (ArrowRenderer.java:23-25).
             PoseStack pose = new PoseStack();
             pose.translate(offset.x, offset.y, offset.z);
-            pose.rotateDegrees(Axis.YP, entity.getYRot(partialTick) - 90.0F);
-            pose.rotateDegrees(Axis.ZP, entity.getXRot(partialTick));
+            pose.rotateDegrees(Axis.YP, arrow.yRot - 90.0F);
+            pose.rotateDegrees(Axis.ZP, arrow.xRot);
             arrowModel(client).visit(
                     pose,
                     (part, _, _, cube) -> {
@@ -957,10 +963,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     });
             return faces;
         }
-        AABB box = entity.getInterpolatedBoundingBox(partialTick).move(eye.scale(-1.0));
-        double[] xs = {box.minX, box.maxX};
-        double[] ys = {box.minY, box.maxY};
-        double[] zs = {box.minZ, box.maxZ};
+        // The entity's box, from the size EntityRenderer copies into the state
+        // (EntityRenderer.java:168-169), standing on its position and centred on x and z.
+        double halfWidth = state.boundingBoxWidth / 2.0;
+        double[] xs = {offset.x - halfWidth, offset.x + halfWidth};
+        double[] ys = {offset.y, offset.y + state.boundingBoxHeight};
+        double[] zs = {offset.z - halfWidth, offset.z + halfWidth};
         for (int side = 0; side < 2; side++) {
             faces.add(
                     new Vec3[] {
