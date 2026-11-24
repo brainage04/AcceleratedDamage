@@ -1,6 +1,8 @@
 package io.github.brainage04.accelerateddamage;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestCommands;
@@ -29,6 +31,8 @@ import java.util.function.IntFunction;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -37,6 +41,9 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
+import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.client.renderer.entity.ArrowRenderer;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -83,7 +90,8 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import org.joml.Matrix4f;
-import org.joml.Quaternionf;
+import org.joml.Vector3f;
+import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
 /// The showcase the owner asked for: every rule, filmed against player-shaped targets with the
@@ -120,6 +128,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
     /// check, or null when no entity covered more than that.
     private static volatile String LAST_FRAME_VIOLATION;
+
+    /// The arrow's model, baked on the first frame that draws an arrow, for {@link #drawnFaces}.
+    private static ModelPart arrowModel;
 
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
@@ -653,10 +664,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
                 .register(AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
-                client -> {
-                    snapProjectilesOffTheCamera(client);
-                    recordFrameCoverage(client);
-                });
+                AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
+        LevelExtractionEvents.END_EXTRACTION.register(
+                AcceleratedDamageClientGameTest::recordFrameCoverage);
         AttackEntityCallback.EVENT.register(
                 (player, level, hand, entity, hitResult) -> {
                     HitLog log = hitLog;
@@ -759,12 +769,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Fails a stage whose frame an entity fills more than a quarter of.
     ///
-    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, at the end of every
-    /// client tick, through the camera's own view and projection matrices. The box is clipped at
-    /// the near plane first, so a body that straddles the plane is measured by what is drawn of it.
-    /// The measurement runs after {@link #snapProjectilesOffTheCamera} in the same tick, so it sees
-    /// the frame that tick draws. The check runs at every stage marker and after every shot, so a
-    /// body across the lens fails the run instead of reaching the film.
+    /// <p>{@link #recordFrameCoverage} measures every entity the client draws, in every frame it
+    /// draws, through that frame's own camera and partial tick. The check runs at every stage
+    /// marker and after every shot, so a body across the lens fails the run instead of reaching the
+    /// film.
     private static void requireNoEntityFillsTheFrame(String stage) {
         String violation = LAST_FRAME_VIOLATION;
         LAST_FRAME_VIOLATION = null;
@@ -828,106 +836,145 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Records the first entity coverage over the threshold in the frame this tick draws, for
-    /// {@link #requireNoEntityFillsTheFrame}.
-    private static void recordFrameCoverage(Minecraft client) {
-        if (client.level == null || client.player == null) {
+    /// Records the first entity coverage over the threshold in a drawn frame, for {@link
+    /// #requireNoEntityFillsTheFrame}.
+    ///
+    /// <p>Runs after the frame's entities are extracted for drawing, with the camera already
+    /// aligned for that frame ({@code GameRenderer.update} before {@code GameRenderer.extract},
+    /// {@code Minecraft.java:1277-1282} in the 26.3 sources). Frames are drawn between ticks too: the
+    /// client handles its packets every frame and ticks only when a tick is due ({@code
+    /// Minecraft.java:1156-1180}), so a projectile added by a packet is drawn at its spawn point
+    /// before any tick hook can see it.
+    private static void recordFrameCoverage(LevelExtractionContext context) {
+        Minecraft client = Minecraft.getInstance();
+        if (client.player == null) {
             return;
         }
-        // Camera.update only runs in the render pass (Camera.java:88-108 in the 26.3 sources), so
-        // at the end of a client tick the camera still holds the previous frame's position and
-        // rotation. The eye and the rotation the next frame will use are the player's own, so the
-        // projection is taken from the camera and the view rotation is rebuilt from the player.
-        Camera camera = client.gameRenderer.mainCamera();
-        Matrix4f projection =
-                new Matrix4f(camera.getViewRotationProjectionMatrix(new Matrix4f()))
-                        .mul(camera.getViewRotationMatrix(new Matrix4f()).invert());
-        // The frame drawn right after a tick uses a partial tick near 0, and Camera.alignWithEntity
-        // takes the rotation, the eye and the entity's box at that same partial tick
-        // (Camera.java:259-266 in the 26.3 sources). Its eye height is the smoothed
-        // lerp(partialTick, eyeHeightOld, eyeHeight) (Camera.java:265), not getEyeHeight(); the
-        // recording player stands still, so the two agree to within a hundredth of a block.
-        {
-            float partialTick = 0.0F;
-            Quaternionf rotation =
-                    new Quaternionf()
-                            .rotationYXZ(
-                                    (float) Math.PI
-                                            - client.player.getViewYRot(partialTick)
-                                                    * (float) (Math.PI / 180.0),
-                                    -client.player.getViewXRot(partialTick)
-                                            * (float) (Math.PI / 180.0),
-                                    0.0F);
-            Matrix4f viewProjection =
-                    new Matrix4f(projection)
-                            .mul(new Matrix4f().rotation(rotation.conjugate(new Quaternionf())));
-            Vec3 eye = client.player.getEyePosition(partialTick);
-            Vec3 forward = client.player.getViewVector(partialTick);
-            for (Entity entity : client.level.entitiesForRendering()) {
-                if (entity == client.player) {
-                    continue;
-                }
-                double covered =
-                        screenCoverage(
-                                viewProjection,
+        Camera camera = context.camera();
+        // The partial tick entities are extracted with (GameRenderer.java:441).
+        float partialTick = context.deltaTracker().getGameTimeDeltaPartialTick(false);
+        Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
+        Vec3 eye = camera.position();
+        Vector3fc forward = camera.forwardVector();
+        for (Entity entity : context.level().entitiesForRendering()) {
+            if (entity == client.player
+                    || !client.getEntityRenderDispatcher()
+                            .shouldRender(
+                                    entity,
+                                    camera.getCullFrustum(),
+                                    eye.x,
+                                    eye.y,
+                                    eye.z,
+                                    partialTick)) {
+                continue;
+            }
+            double covered =
+                    screenCoverage(
+                            viewProjection, forward, drawnFaces(client, entity, partialTick, eye));
+            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
+                LAST_FRAME_VIOLATION =
+                        String.format(
+                                Locale.ROOT,
+                                "%s (tick %d) at %s covers %.0f%% of the frame from the camera at"
+                                        + " %s (partial tick %.2f)",
+                                entity.getType(),
+                                entity.tickCount,
+                                entity.getPosition(partialTick).subtract(eye),
+                                covered * 100.0,
                                 eye,
-                                forward,
-                                entity.getInterpolatedBoundingBox(partialTick));
-                if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
-                    LAST_FRAME_VIOLATION =
-                            String.format(
-                                    Locale.ROOT,
-                                    "%s at %s covers %.0f%% of the frame from the camera at %s"
-                                            + " (partial tick %.2f)",
-                                    entity.getType(),
-                                    entity.position(),
-                                    covered * 100.0,
-                                    eye,
-                                    partialTick);
-                    return;
-                }
+                                partialTick);
+                return;
             }
         }
     }
 
-    /// The fraction of the screen a box covers, from the box clipped against the near plane and
-    /// projected through the camera.
+    /// The faces the renderer draws for an entity, relative to the camera. An arrow is measured by
+    /// its own model: the model reaches 0.68 of a block behind the arrow's position ({@code
+    /// ArrowModel.java:23-31} in the 26.3 sources), so its box misses the tail drawn at the lens.
+    /// Any other entity is measured by its box.
+    private static List<Vec3[]> drawnFaces(
+            Minecraft client, Entity entity, float partialTick, Vec3 eye) {
+        Vec3 offset = entity.getPosition(partialTick).subtract(eye);
+        List<Vec3[]> faces = new ArrayList<>();
+        if (client.getEntityRenderDispatcher().getRenderer(entity) instanceof ArrowRenderer<?, ?>) {
+            if (arrowModel == null) {
+                arrowModel = client.getEntityModels().bakeLayer(ModelLayers.ARROW);
+            }
+            // ArrowRenderer.submit's own pose (ArrowRenderer.java:23-25).
+            PoseStack pose = new PoseStack();
+            pose.translate(offset.x, offset.y, offset.z);
+            pose.rotateDegrees(Axis.YP, entity.getYRot(partialTick) - 90.0F);
+            pose.rotateDegrees(Axis.ZP, entity.getXRot(partialTick));
+            arrowModel.visit(
+                    pose,
+                    (part, _, _, cube) -> {
+                        for (ModelPart.Polygon polygon : cube.polygons) {
+                            Vec3[] face = new Vec3[polygon.vertices().length];
+                            for (int index = 0; index < face.length; index++) {
+                                ModelPart.Vertex vertex = polygon.vertices()[index];
+                                Vector3f point =
+                                        part.pose()
+                                                .transformPosition(
+                                                        vertex.worldX(),
+                                                        vertex.worldY(),
+                                                        vertex.worldZ(),
+                                                        new Vector3f());
+                                face[index] = new Vec3(point.x, point.y, point.z);
+                            }
+                            faces.add(face);
+                        }
+                    });
+            return faces;
+        }
+        AABB box = entity.getInterpolatedBoundingBox(partialTick).move(eye.scale(-1.0));
+        double[] xs = {box.minX, box.maxX};
+        double[] ys = {box.minY, box.maxY};
+        double[] zs = {box.minZ, box.maxZ};
+        for (int side = 0; side < 2; side++) {
+            faces.add(
+                    new Vec3[] {
+                        new Vec3(xs[side], ys[0], zs[0]), new Vec3(xs[side], ys[1], zs[0]),
+                        new Vec3(xs[side], ys[1], zs[1]), new Vec3(xs[side], ys[0], zs[1])
+                    });
+            faces.add(
+                    new Vec3[] {
+                        new Vec3(xs[0], ys[side], zs[0]), new Vec3(xs[1], ys[side], zs[0]),
+                        new Vec3(xs[1], ys[side], zs[1]), new Vec3(xs[0], ys[side], zs[1])
+                    });
+            faces.add(
+                    new Vec3[] {
+                        new Vec3(xs[0], ys[0], zs[side]), new Vec3(xs[1], ys[0], zs[side]),
+                        new Vec3(xs[1], ys[1], zs[side]), new Vec3(xs[0], ys[1], zs[side])
+                    });
+        }
+        return faces;
+    }
+
+    /// The fraction of the screen a set of faces covers, from the faces clipped against the near
+    /// plane and projected through the camera. Points are relative to the camera.
     ///
-    /// <p>The renderer draws the whole box, clipped at the near plane, so a box that straddles the
+    /// <p>The renderer draws each face clipped at the near plane, so a face that straddles the
     /// plane is drawn from the plane outwards: a body a third of a block in front of the camera
     /// fills the frame. Clipping first is what makes that measurable; projecting only the corners
-    /// in front would miss it, and treating every straddling box as full would fail a body beside
+    /// in front would miss it, and treating every straddling face as full would fail a body beside
     /// the lens.
     private static double screenCoverage(
-            Matrix4f viewProjection, Vec3 eye, Vec3 forward, AABB box) {
-        Vec3[] corners = new Vec3[8];
-        double[] depth = new double[8];
-        for (int corner = 0; corner < 8; corner++) {
-            corners[corner] =
-                    new Vec3(
-                            (corner & 1) == 0 ? box.minX : box.maxX,
-                            (corner & 2) == 0 ? box.minY : box.maxY,
-                            (corner & 4) == 0 ? box.minZ : box.maxZ);
-            depth[corner] = corners[corner].subtract(eye).dot(forward) - NEAR_PLANE;
-        }
+            Matrix4f viewProjection, Vector3fc forward, List<Vec3[]> faces) {
+        Vec3 ahead = new Vec3(forward.x(), forward.y(), forward.z());
         List<Vec3> clipped = new ArrayList<>();
-        for (int corner = 0; corner < 8; corner++) {
-            if (depth[corner] >= 0.0) {
-                clipped.add(corners[corner]);
-            }
-        }
-        for (int a = 0; a < 8; a++) {
-            for (int bit : new int[] {1, 2, 4}) {
-                int b = a ^ bit;
-                if (b < a || (depth[a] >= 0.0) == (depth[b] >= 0.0)) {
-                    continue;
+        for (Vec3[] face : faces) {
+            for (int index = 0; index < face.length; index++) {
+                Vec3 a = face[index];
+                Vec3 b = face[(index + 1) % face.length];
+                double depthA = a.dot(ahead) - NEAR_PLANE;
+                double depthB = b.dot(ahead) - NEAR_PLANE;
+                if (depthA >= 0.0) {
+                    clipped.add(a);
                 }
-                double t = depth[a] / (depth[a] - depth[b]);
-                clipped.add(corners[a].lerp(corners[b], t));
+                if ((depthA >= 0.0) != (depthB >= 0.0)) {
+                    clipped.add(a.lerp(b, depthA / (depthA - depthB)));
+                }
             }
-        }
-        if (clipped.isEmpty()) {
-            return 0.0;
         }
         double minX = Double.MAX_VALUE;
         double maxX = -Double.MAX_VALUE;
@@ -936,11 +983,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         for (Vec3 point : clipped) {
             Vector4f projected =
                     viewProjection.transform(
-                            new Vector4f(
-                                    (float) (point.x - eye.x),
-                                    (float) (point.y - eye.y),
-                                    (float) (point.z - eye.z),
-                                    1.0F));
+                            new Vector4f((float) point.x, (float) point.y, (float) point.z, 1.0F));
             if (projected.w <= 0.0F) {
                 continue;
             }
