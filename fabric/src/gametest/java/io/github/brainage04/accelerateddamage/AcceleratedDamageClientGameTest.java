@@ -16,6 +16,7 @@ import io.github.brainage04.minecraftmodconventions.PerformanceOverlayPlacement;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,11 +43,15 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
+import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.renderer.entity.ArrowRenderer;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.ThrownTridentRenderer;
 import net.minecraft.client.renderer.entity.state.ArrowRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.entity.state.ThrownTridentRenderState;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -131,8 +136,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// check, or null when no entity covered more than that.
     private static volatile String LAST_FRAME_VIOLATION;
 
-    /// The arrow's model, for {@link #arrowModel(Minecraft)}.
-    private static ModelPart arrowModel;
+    /// The models {@link #modelFaces} measures, baked on first use on the render thread.
+    private static final Map<ModelLayerLocation, ModelPart> MODELS = new HashMap<>();
 
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
@@ -677,7 +682,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 AcceleratedDamageClientGameTest::snapProjectilesOffTheCamera);
         LevelExtractionEvents.END_EXTRACTION.register(
                 context -> {
-                    hideArrowsAtTheLens(context);
+                    hideProjectilesAtTheLens(context);
                     recordFrameCoverage(context);
                 });
         AttackEntityCallback.EVENT.register(
@@ -754,15 +759,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// current one ({@code EntityRenderer.java:163-165}), and the old position is the spawn point
     /// until the entity's first tick ({@code Entity.commonTick}, {@code Entity.java:522}), so the
     /// first frames of every shot draw the projectile across the near plane. The server's
-    /// projectile is untouched. An arrow is left where it is and kept out of the frame by {@link
-    /// #hideArrowsAtTheLens} instead.
+    /// projectile is untouched. An arrow or a trident is left where it is and kept out of the frame
+    /// by {@link #hideProjectilesAtTheLens} instead.
     private static void snapOffTheCamera(Minecraft client, Projectile projectile) {
         // Only the recording player's own shots: a projectile another entity spawned at the eye is
         // not this film's, and moving it would change what the take shows.
-        if (client.player == null
-                || projectile.getOwner() != client.player
-                || client.getEntityRenderDispatcher().getRenderer(projectile)
-                        instanceof ArrowRenderer<?, ?>) {
+        if (client.player == null || projectile.getOwner() != client.player) {
+            return;
+        }
+        EntityRenderer<?, ?> renderer = client.getEntityRenderDispatcher().getRenderer(projectile);
+        if (renderer instanceof ArrowRenderer<?, ?> || renderer instanceof ThrownTridentRenderer) {
             return;
         }
         Vec3 eye = client.player.getEyePosition();
@@ -786,45 +792,83 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         projectile.setOldPosAndRot();
     }
 
-    /// Leaves out of a frame every arrow whose model reaches within a block of the camera.
+    /// Leaves out of a frame every arrow and trident whose model comes within a block of the
+    /// camera.
     ///
-    /// <p>An arrow spawns at its shooter's eye less 0.1 ({@code AbstractArrow.java:123} in the
-    /// 26.3 sources), where the first-person camera sits, and its model reaches 0.68 of a block
-    /// behind its position ({@code ArrowModel.java:23-31}), so the first frames of a shot draw its
-    /// tail and shaft across the lens as flat squares of its texture. Moving the client's copy
-    /// forward does not hold: the server's position update puts it back where the server's arrow
-    /// is, which after one tick of a bow drawn for three ticks is a third of a block ahead. Vanilla
-    /// leaves a thrown projectile out of the frame the same way for its first two ticks within 3.5
-    /// blocks ({@code ThrowableProjectile.java:24-27}); an arrow has no such rule. The arrow is
-    /// drawn from the first frame its tail is a block ahead of the camera.
-    private static void hideArrowsAtTheLens(LevelExtractionContext context) {
+    /// <p>An arrow spawns at its shooter's eye less 0.1 ({@code AbstractArrow.java:123} in the 26.3
+    /// sources), and so does a trident, which is an arrow ({@code ThrownTrident.java:31,43-44});
+    /// the first-person camera sits at that eye. An arrow's model reaches 0.68 of a block behind
+    /// its position ({@code ArrowModel.java:23-31}) and a trident's 1.69, its 27-pixel pole ({@code
+    /// TridentModel.java:24}), so the first frames of a shot draw the tail across the lens as flat
+    /// squares of its texture. Moving the client's copy forward does not hold: a take had the
+    /// server's position update put a bow arrow back a third of a block ahead of the eye before its
+    /// first client tick, and another drew a trident at its spawn point. Vanilla leaves a thrown
+    /// projectile out of the frame the same way for its first two ticks within 3.5 blocks ({@code
+    /// ThrowableProjectile.java:24-27}); an arrow and a trident have no such rule. Each is drawn
+    /// from the first frame its whole model is a block from the camera.
+    private static void hideProjectilesAtTheLens(LevelExtractionContext context) {
+        Minecraft client = Minecraft.getInstance();
         Vec3 eye = context.camera().position();
-        double clearance = 1.0 + arrowTailReach(Minecraft.getInstance());
         context.levelState()
                 .entityRenderStates
                 .removeIf(
-                        state ->
-                                state instanceof ArrowRenderState
-                                        && eye.distanceToSqr(state.x, state.y, state.z)
-                                                < clearance * clearance);
+                        state -> {
+                            List<Vec3[]> faces = modelFaces(client, state, eye);
+                            if (faces == null) {
+                                return false;
+                            }
+                            for (Vec3[] face : faces) {
+                                for (Vec3 point : face) {
+                                    if (point.lengthSqr() < 1.0) {
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        });
     }
 
-    /// How far behind its position the renderer draws an arrow, read from the arrow's own model:
-    /// its length runs along the model's x axis, with the tail on the negative side ({@code
-    /// ArrowModel.java:23-28} in the 26.3 sources).
-    private static double arrowTailReach(Minecraft client) {
-        double[] tail = {0.0};
-        arrowModel(client)
-                .getExtentsForGui(new PoseStack(), point -> tail[0] = Math.min(tail[0], point.x()));
-        return -tail[0];
-    }
-
-    /// The arrow's model as {@code ArrowRenderer} draws it, baked on first use.
-    private static ModelPart arrowModel(Minecraft client) {
-        if (arrowModel == null) {
-            arrowModel = client.getEntityModels().bakeLayer(ModelLayers.ARROW);
+    /// The faces of an arrow's or a trident's model as its renderer draws them, relative to the
+    /// camera, or null for any other entity.
+    private static List<Vec3[]> modelFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
+        PoseStack pose = new PoseStack();
+        pose.translate(state.x - eye.x, state.y - eye.y, state.z - eye.z);
+        ModelLayerLocation layer;
+        if (state instanceof ArrowRenderState arrow) {
+            // ArrowRenderer.submit's own pose (ArrowRenderer.java:23-25).
+            pose.rotateDegrees(Axis.YP, arrow.yRot - 90.0F);
+            pose.rotateDegrees(Axis.ZP, arrow.xRot);
+            layer = ModelLayers.ARROW;
+        } else if (state instanceof ThrownTridentRenderState trident) {
+            // ThrownTridentRenderer.submit's own pose (ThrownTridentRenderer.java:30-31).
+            pose.rotateDegrees(Axis.YP, trident.yRot - 90.0F);
+            pose.rotateDegrees(Axis.ZP, trident.xRot + 90.0F);
+            layer = ModelLayers.TRIDENT;
+        } else {
+            return null;
         }
-        return arrowModel;
+        List<Vec3[]> faces = new ArrayList<>();
+        MODELS.computeIfAbsent(layer, client.getEntityModels()::bakeLayer)
+                .visit(
+                        pose,
+                        (part, _, _, cube) -> {
+                            for (ModelPart.Polygon polygon : cube.polygons) {
+                                Vec3[] face = new Vec3[polygon.vertices().length];
+                                for (int index = 0; index < face.length; index++) {
+                                    ModelPart.Vertex vertex = polygon.vertices()[index];
+                                    Vector3f point =
+                                            part.pose()
+                                                    .transformPosition(
+                                                            vertex.worldX(),
+                                                            vertex.worldY(),
+                                                            vertex.worldZ(),
+                                                            new Vector3f());
+                                    face[index] = new Vec3(point.x, point.y, point.z);
+                                }
+                                faces.add(face);
+                            }
+                        });
+        return faces;
     }
 
     /// Fails a stage whose frame an entity fills more than a quarter of.
@@ -929,40 +973,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// The faces the renderer draws for a render state, relative to the camera. An arrow is
-    /// measured by its own model: the model reaches 0.68 of a block behind the arrow's position
-    /// ({@code ArrowModel.java:23-31} in the 26.3 sources), so its box misses the tail drawn at the
-    /// lens. Any other entity is measured by its box.
+    /// The faces the renderer draws for a render state, relative to the camera. An arrow or a
+    /// trident is measured by its own model, which reaches far behind its position (see {@link
+    /// #hideProjectilesAtTheLens}), so its box misses the tail drawn at the lens. Any other entity
+    /// is measured by its box.
     private static List<Vec3[]> drawnFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
+        List<Vec3[]> model = modelFaces(client, state, eye);
+        if (model != null) {
+            return model;
+        }
         Vec3 offset = new Vec3(state.x, state.y, state.z).subtract(eye);
         List<Vec3[]> faces = new ArrayList<>();
-        if (state instanceof ArrowRenderState arrow) {
-            // ArrowRenderer.submit's own pose (ArrowRenderer.java:23-25).
-            PoseStack pose = new PoseStack();
-            pose.translate(offset.x, offset.y, offset.z);
-            pose.rotateDegrees(Axis.YP, arrow.yRot - 90.0F);
-            pose.rotateDegrees(Axis.ZP, arrow.xRot);
-            arrowModel(client).visit(
-                    pose,
-                    (part, _, _, cube) -> {
-                        for (ModelPart.Polygon polygon : cube.polygons) {
-                            Vec3[] face = new Vec3[polygon.vertices().length];
-                            for (int index = 0; index < face.length; index++) {
-                                ModelPart.Vertex vertex = polygon.vertices()[index];
-                                Vector3f point =
-                                        part.pose()
-                                                .transformPosition(
-                                                        vertex.worldX(),
-                                                        vertex.worldY(),
-                                                        vertex.worldZ(),
-                                                        new Vector3f());
-                                face[index] = new Vec3(point.x, point.y, point.z);
-                            }
-                            faces.add(face);
-                        }
-                    });
-            return faces;
-        }
         // The entity's box, from the size EntityRenderer copies into the state
         // (EntityRenderer.java:168-169), standing on its position and centred on x and z.
         double halfWidth = state.boundingBoxWidth / 2.0;
