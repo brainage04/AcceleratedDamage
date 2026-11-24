@@ -955,7 +955,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
         // A particle's quad is extracted relative to the camera (SingleQuadParticle.java:66-69),
-        // and buildLayer hands out the four corners the renderer draws.
+        // and buildLayer hands out the four corners the renderer draws. Only a particle within a
+        // block of the camera is measured: a sword's sweep is drawn a block ahead at half the
+        // player's height (Player.java:1178-1180) on a quad two blocks wide
+        // (AttackSweepParticle.java:18), a thin arc whose quad covers more than half the frame.
         QuadCorners corners = new QuadCorners();
         for (ParticleGroupRenderState group : context.levelState().particlesRenderState.particles) {
             if (group instanceof QuadParticleRenderState quads) {
@@ -965,9 +968,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
         for (int first = 0; first + 3 < corners.points.size(); first += 4) {
-            List<Vec3[]> quad =
-                    List.<Vec3[]>of(corners.points.subList(first, first + 4).toArray(Vec3[]::new));
-            double covered = screenCoverage(viewProjection, forward, quad);
+            Vec3[] quad = corners.points.subList(first, first + 4).toArray(Vec3[]::new);
+            Vec3 centre = quad[0].add(quad[1]).add(quad[2]).add(quad[3]).scale(0.25);
+            if (centre.lengthSqr() >= 1.0) {
+                continue;
+            }
+            double covered = screenCoverage(viewProjection, forward, List.<Vec3[]>of(quad));
             if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
                 LAST_FRAME_VIOLATION =
                         String.format(
