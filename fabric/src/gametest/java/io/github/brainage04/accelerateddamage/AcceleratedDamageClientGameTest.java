@@ -129,9 +129,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final double NEAR_PLANE = 0.05;
 
     /// The most of the frame the entities and particles of one frame may cover together. A
-    /// player-shaped target at its own distance covers a few per cent of it; a body across the
-    /// lens covers all of it. A take measured at 0.5 had three frames of the dummy at 45.8% and
-    /// four at about 30%, so the bound is a quarter.
+    /// player-shaped target at its own distance covers a few per cent of it; a body across the lens
+    /// covers all of it. A take measured at 0.5 had three frames of the dummy at 45.8% and four at
+    /// about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
     /// The frame's coverage is rasterised onto this grid, in cells across and down: a quarter of
@@ -153,15 +153,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static volatile String LAST_FRAME_VIOLATION;
 
     /// The models {@link #modelFaces} measures. They are baked once per model set rather than per
-    /// frame, and re-baked when the client swaps its model set at a resource reload
-    /// ({@code ModelManager}).
+    /// frame, and re-baked when the client swaps its model set at a resource reload ({@code
+    /// ModelManager}).
     private static final Map<ModelLayerLocation, ModelPart> MODELS = new HashMap<>();
 
     private static Object modelsOwner;
 
-    /// Scratch vertices for the coverage raster, render thread only: a polygon clipped at the
-    /// near plane gains at most one vertex per clipped edge, and the quads and model faces the
-    /// raster reads have four.
+    /// Scratch vertices for the coverage raster, render thread only: a polygon clipped at the near
+    /// plane gains at most one vertex per clipped edge, and the quads and model faces the raster
+    /// reads have four.
     private static final int MAX_RASTER_VERTICES = 8;
 
     private static final double[] RWX = new double[MAX_RASTER_VERTICES];
@@ -176,6 +176,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// One particle quad's corners and UV parameters as {@code buildLayer} emits them, render
     /// thread only.
     private static final double[] QX = new double[4];
+
     private static final double[] QY = new double[4];
     private static final double[] QZ = new double[4];
     private static final float[] QU = new float[4];
@@ -183,12 +184,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// The reflected sprite list of each particle atlas, keyed by the atlas object so a reload
     /// binds a fresh list. Null when the lookup failed once: the sprites are then treated opaque.
-    private static final Map<net.minecraft.client.renderer.texture.TextureAtlas, List<net.minecraft.client.renderer.texture.TextureAtlasSprite>> ATLAS_SPRITES = new HashMap<>();
+    private static final Map<
+                    net.minecraft.client.renderer.texture.TextureAtlas,
+                    List<net.minecraft.client.renderer.texture.TextureAtlasSprite>>
+            ATLAS_SPRITES = new HashMap<>();
 
     private static boolean atlasSpritesBroken;
 
     /// The reflected image of each sprite the raster samples, keyed by the sprite contents.
-    private static final Map<net.minecraft.client.renderer.texture.SpriteContents, com.mojang.blaze3d.platform.NativeImage> SPRITE_IMAGES = new HashMap<>();
+    private static final Map<
+                    net.minecraft.client.renderer.texture.SpriteContents,
+                    com.mojang.blaze3d.platform.NativeImage>
+            SPRITE_IMAGES = new HashMap<>();
 
     private static boolean spriteImagesBroken;
 
@@ -931,16 +938,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Minecraft.java:1156-1180}), so a projectile added or moved by a packet is drawn before any
     /// tick hook can see it.
     ///
-    /// <p>Every item is rasterised onto a coarse grid and what fails is their union, not any one
-    /// of them: the defect this check exists for was many overlapping crit squares, no one of
-    /// which would have failed alone. A particle is only counted where its sprite is drawn: the
-    /// quad of a sword's sweep, two blocks wide a block ahead of the player ({@code
-    /// Player.java:1178-1180}, {@code AttackSweepParticle.java:18}), covers half the frame while
-    /// its thin arc draws almost none of it. A particle whose sprite cannot be read counts as
-    /// opaque. {@code ElderGuardianParticleGroup} and {@code ItemPickupParticleGroup}, the other
-    /// {@code ParticleGroupRenderState} types, are not measured; neither is in the film. An
-    /// invisible entity draws nothing but a worn item ({@code ArmorStandRenderer}), so it is not
-    /// measured.
+    /// <p>Every item is rasterised onto a coarse grid and what fails is their union, not any one of
+    /// them: the defect this check exists for was many overlapping crit squares, no one of which
+    /// would have failed alone. A particle is only counted where its sprite is drawn: the quad of a
+    /// sword's sweep, two blocks wide a block ahead of the player ({@code Player.java:1178-1180},
+    /// {@code AttackSweepParticle.java:18}), covers half the frame while its thin arc draws almost
+    /// none of it. A particle whose sprite cannot be read counts as opaque. {@code
+    /// ElderGuardianParticleGroup} and {@code ItemPickupParticleGroup}, the other {@code
+    /// ParticleGroupRenderState} types, are not measured; neither is in the film. An invisible
+    /// entity draws nothing but a worn item ({@code ArmorStandRenderer}), so it is not measured.
     private static void recordFrameCoverage(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
         Camera camera = context.camera();
@@ -1027,7 +1033,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             double depthA = a.dot(ahead) - NEAR_PLANE;
             double depthB = b.dot(ahead) - NEAR_PLANE;
             if (depthA >= 0.0) {
-                projectVertex(a, paramA == null ? 0.0 : paramA[index], paramA == null ? 0.0 : paramB[index], viewProjection, count);
+                projectVertex(
+                        a,
+                        paramA == null ? 0.0 : paramA[index],
+                        paramA == null ? 0.0 : paramB[index],
+                        viewProjection,
+                        count);
                 count++;
             }
             if ((depthA >= 0.0) != (depthB >= 0.0) && count < MAX_RASTER_VERTICES) {
@@ -1049,7 +1060,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             Vector4f projected =
                     viewProjection.transform(
                             new Vector4f(
-                                    (float) RWX[vertex], (float) RWY[vertex], (float) RWZ[vertex], 1.0F));
+                                    (float) RWX[vertex],
+                                    (float) RWY[vertex],
+                                    (float) RWZ[vertex],
+                                    1.0F));
             if (projected.w <= 0.0F) {
                 return 0;
             }
@@ -1069,13 +1083,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         RPB[vertex] = paramB;
     }
 
-    /// Whether the sprite's pixel at (x, y) is opaque. A particle is measured for what it hides:
-    /// a translucent pixel tints what is behind it and the scene shows through, so only a fully
+    /// Whether the sprite's pixel at (x, y) is opaque. A particle is measured for what it hides: a
+    /// translucent pixel tints what is behind it and the scene shows through, so only a fully
     /// opaque pixel hides the frame. {@code SpriteContents.isTransparent} answers only for a fully
     /// transparent pixel and keeps the image private, so the alpha is read through the same
-    /// reflection as the atlas's sprite list, at frame zero ({@code SpriteContents.java:212-221}
-    /// in the 26.3 sources; the film's animated sprites do not change their coverage between
-    /// frames). A pixel whose image cannot be read counts as opaque.
+    /// reflection as the atlas's sprite list, at frame zero ({@code SpriteContents.java:212-221} in
+    /// the 26.3 sources; the film's animated sprites do not change their coverage between frames).
+    /// A pixel whose image cannot be read counts as opaque.
     private static boolean spriteOpaque(
             net.minecraft.client.renderer.texture.SpriteContents sprite, int x, int y) {
         com.mojang.blaze3d.platform.NativeImage image = spriteImage(sprite);
@@ -1116,7 +1130,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// drawn, read at the quad's UV interpolated into the cell. Returns the cells this item newly
     /// covered.
     private static int rasterize(
-            int count, QuadShape quad, net.minecraft.client.renderer.texture.SpriteContents sprite, double[] uvSpan) {
+            int count,
+            QuadShape quad,
+            net.minecraft.client.renderer.texture.SpriteContents sprite,
+            double[] uvSpan) {
         if (count < 3) {
             return 0;
         }
@@ -1182,11 +1199,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// One particle quad's projected corners, for the inverse bilinear lookup that reads a cell's
-    /// UV: corner 0 sits at parameters (1, 0), corner 1 at (1, 1), corner 2 at (0, 1) and corner
-    /// 3 at (0, 0), the vertex order {@code QuadParticleRenderState.renderRotatedQuad} emits
-    /// ({@code QuadParticleRenderState.java:76-81} in the 26.3 sources). The bilinear inversion is
-    /// Newton's from the centre; a quad's projection is close to planar, so three iterations are
-    /// far inside a cell.
+    /// UV: corner 0 sits at parameters (1, 0), corner 1 at (1, 1), corner 2 at (0, 1) and corner 3
+    /// at (0, 0), the vertex order {@code QuadParticleRenderState.renderRotatedQuad} emits ({@code
+    /// QuadParticleRenderState.java:76-81} in the 26.3 sources). The bilinear inversion is Newton's
+    /// from the centre; a quad's projection is close to planar, so three iterations are far inside
+    /// a cell.
     private static final class QuadShape {
         private final double[] xs;
         private final double[] ys;
@@ -1244,14 +1261,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         private final SingleQuadParticle.Layer layer;
         private final Vec3 ahead;
         private final Matrix4f viewProjection;
-        private final Map<String, net.minecraft.client.renderer.texture.TextureAtlasSprite> sprites =
-                new HashMap<>();
+        private final Map<String, net.minecraft.client.renderer.texture.TextureAtlasSprite>
+                sprites = new HashMap<>();
         private int vertex;
         private int largest;
         private String largestItem;
 
         private QuadCoverage(
-                Minecraft client, SingleQuadParticle.Layer layer, Vec3 ahead, Matrix4f viewProjection) {
+                Minecraft client,
+                SingleQuadParticle.Layer layer,
+                Vec3 ahead,
+                Matrix4f viewProjection) {
             this.client = client;
             this.layer = layer;
             this.ahead = ahead;
@@ -1356,8 +1376,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         private List<net.minecraft.client.renderer.texture.TextureAtlasSprite> atlasSprites() {
             net.minecraft.client.renderer.texture.AbstractTexture texture =
                     client.getTextureManager().getTexture(layer.textureAtlasLocation());
-            if (!(texture
-                    instanceof net.minecraft.client.renderer.texture.TextureAtlas atlas)) {
+            if (!(texture instanceof net.minecraft.client.renderer.texture.TextureAtlas atlas)) {
                 return List.of();
             }
             List<net.minecraft.client.renderer.texture.TextureAtlasSprite> cached =
@@ -1677,9 +1696,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Spawns the invisible armor stand the bow, crossbow, firework and trident stages are filmed
     /// through. It stands 1.8 blocks beside the shooter and a block behind {@link #RANGE_STAND},
-    /// looking at a point halfway between the shooter and the target: close enough that the
-    /// shooter fills the left of the frame, and sideways of the line of fire, so a crit arrow's
-    /// trail, which drifts back along that line ({@code AbstractArrow.java:226-238} and {@code
+    /// looking at a point halfway between the shooter and the target: close enough that the shooter
+    /// fills the left of the frame, and sideways of the line of fire, so a crit arrow's trail,
+    /// which drifts back along that line ({@code AbstractArrow.java:226-238} and {@code
     /// CritParticle.java:20-28} in the 26.3 sources), passes blocks from the lens. First person
     /// cannot keep that trail off the lens: the arrow spawns at the eye and each tick's four crits
     /// spawn on its path and drift back along it for about four blocks. The stand is invisible, so
@@ -1708,8 +1727,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// for a Player camera ({@code Hud.java:728} in the 26.3 sources), so these stages show
     /// neither; the captions carry the shot count and the target's health instead. Vanilla also
     /// never draws the local player while the camera is not it ({@code LevelExtractor.java:269-270}
-    /// in the 26.3 sources), so the shooter is invisible; its first-person hands and bow are
-    /// drawn, as vanilla draws them for a non-player camera ({@code GameRenderer.java:377-380}).
+    /// in the 26.3 sources), so the shooter is invisible; its first-person hands and bow are drawn,
+    /// as vanilla draws them for a non-player camera ({@code GameRenderer.java:377-380}).
     private static void enterRangeCamera(
             ClientGameTestContext context, TestDedicatedServerContext server, UUID standId) {
         context.waitFor(
@@ -1954,8 +1973,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
         rangeCameraStand =
-                server.computeOnServer(
-                        current -> spawnRangeCameraStand(current, RANGE_TARGET));
+                server.computeOnServer(current -> spawnRangeCameraStand(current, RANGE_TARGET));
         enterRangeCamera(context, server, rangeCameraStand);
         // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
         // while the client's carried item is empty, whatever the server's main hand holds.
