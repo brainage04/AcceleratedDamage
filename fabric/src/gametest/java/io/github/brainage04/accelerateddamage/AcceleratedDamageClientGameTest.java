@@ -773,7 +773,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-
     /// Puts every target's client copy back on its anchor.
     ///
     /// <p>A target's model is drawn at the position lerped from its old position ({@code
