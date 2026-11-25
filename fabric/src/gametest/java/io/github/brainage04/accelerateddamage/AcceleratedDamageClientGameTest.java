@@ -79,8 +79,8 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.projectile.Projectile;
-import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -128,17 +128,64 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Camera.java:106} in the 26.3 sources).
     private static final double NEAR_PLANE = 0.05;
 
-    /// The most of the frame one entity may cover. A player-shaped target at its own distance
-    /// covers a few per cent of it; a body across the lens covers all of it. A take measured at 0.5
-    /// had three frames of the dummy at 45.8% and four at about 30%, so the bound is a quarter.
+    /// The most of the frame the entities and particles of one frame may cover together. A
+    /// player-shaped target at its own distance covers a few per cent of it; a body across the
+    /// lens covers all of it. A take measured at 0.5 had three frames of the dummy at 45.8% and
+    /// four at about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
-    /// The last entity coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame
-    /// check, or null when no entity covered more than that.
+    /// The frame's coverage is rasterised onto this grid, in cells across and down: a quarter of
+    /// the frame is thirteen and a half rows of one or twenty-four columns of the other, far finer
+    /// than the bound needs to be.
+    private static final int COVERAGE_GRID_WIDTH = 96;
+
+    private static final int COVERAGE_GRID_HEIGHT = 54;
+
+    /// The frame's coverage cells, marked with the frame's epoch rather than cleared: the raster
+    /// runs on the render thread once per drawn frame, so one scratch grid and one epoch serve
+    /// every frame.
+    private static final int[] COVERAGE_GRID = new int[COVERAGE_GRID_WIDTH * COVERAGE_GRID_HEIGHT];
+
+    private static int coverageEpoch;
+
+    /// The last coverage over {@link #MAX_ENTITY_SCREEN_COVERAGE} since the last frame check, or
+    /// null when no frame's entities and particles covered more than that.
     private static volatile String LAST_FRAME_VIOLATION;
 
-    /// The models {@link #modelFaces} measures, baked on first use on the render thread.
+    /// The models {@link #modelFaces} measures. They are baked once per model set rather than per
+    /// frame, and re-baked when the client swaps its model set at a resource reload
+    /// ({@code ModelManager}).
     private static final Map<ModelLayerLocation, ModelPart> MODELS = new HashMap<>();
+
+    private static Object modelsOwner;
+
+    /// Scratch vertices for the coverage raster, render thread only: a polygon clipped at the
+    /// near plane gains at most one vertex per clipped edge, and the quads and model faces the
+    /// raster reads have four.
+    private static final int MAX_RASTER_VERTICES = 8;
+
+    private static final double[] RWX = new double[MAX_RASTER_VERTICES];
+    private static final double[] RWY = new double[MAX_RASTER_VERTICES];
+    private static final double[] RWZ = new double[MAX_RASTER_VERTICES];
+    private static final double[] RNX = new double[MAX_RASTER_VERTICES];
+    private static final double[] RNY = new double[MAX_RASTER_VERTICES];
+    private static final double[] RIW = new double[MAX_RASTER_VERTICES];
+    private static final double[] RPA = new double[MAX_RASTER_VERTICES];
+    private static final double[] RPB = new double[MAX_RASTER_VERTICES];
+
+    /// One particle quad's corners and UV parameters as {@code buildLayer} emits them, render
+    /// thread only.
+    private static final double[] QX = new double[4];
+    private static final double[] QY = new double[4];
+    private static final double[] QZ = new double[4];
+    private static final float[] QU = new float[4];
+    private static final float[] QV = new float[4];
+
+    /// The reflected sprite list of each particle atlas, keyed by the atlas object so a reload
+    /// binds a fresh list. Null when the lookup failed once: the sprites are then treated opaque.
+    private static final Map<net.minecraft.client.renderer.texture.TextureAtlas, List<net.minecraft.client.renderer.texture.TextureAtlasSprite>> ATLAS_SPRITES = new HashMap<>();
+
+    private static boolean atlasSpritesBroken;
 
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
@@ -325,6 +372,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// The game tick the server is on, set at the start of every server tick.
     private static volatile int serverTick;
+
+    /// The armor stand the projectile stages' camera sits on, or null while the camera is the
+    /// recording player.
+    private static volatile UUID rangeCameraStand;
 
     /// The log of the half being filmed, or {@code null} between halves. Written on the server
     /// thread only.
@@ -605,6 +656,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 AcceleratedDamageClientGameTest::chest,
                                 slot -> new ItemStack(Items.TRIDENT),
                                 DRAW_CADENCE_TICKS);
+                        if (rangeCameraStand != null) {
+                            leaveRangeCamera(context, server, rangeCameraStand);
+                            rangeCameraStand = null;
+                        }
                         requireSpearGate(context, server, playerId);
                         recordEffectScene(context, server, playerId, effectsScene());
                         // Aimed at the target's eyes, the throw's lift of 20 degrees above the
@@ -628,6 +683,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         ClientGameTestCommands.clearChat(context);
                         context.waitTicks(4);
                     } finally {
+                        if (rangeCameraStand != null) {
+                            UUID stand = rangeCameraStand;
+                            rangeCameraStand = null;
+                            context.runOnClient(client -> client.setCameraEntity(client.player));
+                            server.runOnServer(
+                                    current -> {
+                                        Entity entity = current.overworld().getEntity(stand);
+                                        if (entity != null) {
+                                            entity.discard();
+                                        }
+                                    });
+                        }
                         TRACKED.clear();
                         publishTrackedIds();
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
@@ -672,13 +739,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 .register(AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(
                 AcceleratedDamageClientGameTest::pinTargetsToTheirAnchors);
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK
-                .register(AcceleratedDamageClientGameTest::dropOwnCritTrails);
         LevelExtractionEvents.END_EXTRACTION.register(
-                context -> {
-                    hideProjectilesAtTheLens(context);
-                    recordFrameCoverage(context);
-                });
+                AcceleratedDamageClientGameTest::recordFrameCoverage);
         AttackEntityCallback.EVENT.register(
                 (player, level, hand, entity, hitResult) -> {
                     HitLog log = hitLog;
@@ -711,31 +773,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         listenersRegistered = true;
     }
 
-    /// Clears the crit flag on the client's copies of the recording player's own arrows, so they
-    /// leave no crit trail.
-    ///
-    /// <p>A full-power bow shot and a player's crossbow shot are crit arrows ({@code
-    /// BowItem.java:41}, {@code CrossbowItem.java:184}, {@code ProjectileWeaponItem.java:96-100} in
-    /// the 26.3 sources), and the client's copy spawns four crit particles a tick along its path,
-    /// starting where it was before the tick ({@code AbstractArrow.java:226-238}). Each flies back
-    /// along the arrow's path at 0.4 of its speed with a friction of 0.7 ({@code
-    /// CritParticle.java:20-28}), about four blocks for a full-power shot, so the trail of an arrow
-    /// shot from the camera flies through the lens: the tan squares that filled the bow and
-    /// crossbow stages. The server's arrow keeps its flag, so the damage is the game's own; only
-    /// the film's own arrows lose their trail. Run before the client's tick, where the particles
-    /// are spawned, and after the packets that may set the flag again.
-    private static void dropOwnCritTrails(Minecraft client) {
-        if (client.level == null || client.player == null) {
-            return;
-        }
-        for (Entity entity : client.level.entitiesForRendering()) {
-            if (entity instanceof AbstractArrow arrow
-                    && arrow.isCritArrow()
-                    && arrow.getOwner() == client.player) {
-                arrow.setCritArrow(false);
-            }
-        }
-    }
 
     /// Puts every target's client copy back on its anchor.
     ///
@@ -764,52 +801,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Leaves out of a frame every projectile that comes within a block of the camera.
-    ///
-    /// <p>The player's shots spawn at its eye: an arrow, and a trident, which is an arrow, at the
-    /// eye less 0.1 ({@code AbstractArrow.java:123} and {@code ThrownTrident.java:31,43-44} in the
-    /// 26.3 sources), a firework from a crossbow at the eye less 0.15 ({@code
-    /// CrossbowItem.java:155}), and the first-person camera sits at that eye. Until its first tick
-    /// the client draws it there, and a frame can be drawn before that tick: the client handles its
-    /// packets every frame and ticks only when a tick is due ({@code Minecraft.java:1156-1180}). An
-    /// arrow's model also reaches 0.68 of a block behind its position ({@code
-    /// ArrowModel.java:23-31}) and a trident's 1.69, its 27-pixel pole ({@code
-    /// TridentModel.java:24}), so a slow arrow's tail stays at the lens for ticks. Each draws as
-    /// flat squares of its texture across the frame. Moving the client's copy forward does not
-    /// hold: in takes the server's position update put a bow arrow back a third of a block ahead of
-    /// the eye, and a trident and a firework were drawn at their spawn points despite the move.
-    /// Vanilla leaves a thrown projectile out of the frame the same way for its first two ticks
-    /// within 3.5 blocks ({@code ThrowableProjectile.java:24-27}); other projectiles have no such
-    /// rule. Each is drawn from the first frame all it draws is a block from the camera.
-    private static void hideProjectilesAtTheLens(LevelExtractionContext context) {
-        Minecraft client = Minecraft.getInstance();
-        Vec3 eye = context.camera().position();
-        // A render state names its entity's type but not its class, so the projectile types are
-        // read from the level's own entities.
-        Set<EntityType<?>> projectiles = new HashSet<>();
-        for (Entity entity : context.level().entitiesForRendering()) {
-            if (entity instanceof Projectile) {
-                projectiles.add(entity.getType());
-            }
-        }
-        context.levelState()
-                .entityRenderStates
-                .removeIf(
-                        state -> {
-                            if (!projectiles.contains(state.entityType)) {
-                                return false;
-                            }
-                            for (Vec3[] face : drawnFaces(client, state, eye)) {
-                                for (Vec3 point : face) {
-                                    if (point.lengthSqr() < 1.0) {
-                                        return true;
-                                    }
-                                }
-                            }
-                            return false;
-                        });
-    }
-
     /// The faces of an arrow's or a trident's model as its renderer draws them, relative to the
     /// camera, or null for any other entity.
     private static List<Vec3[]> modelFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
@@ -828,6 +819,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             layer = ModelLayers.TRIDENT;
         } else {
             return null;
+        }
+        if (modelsOwner != client.getEntityModels()) {
+            MODELS.clear();
+            modelsOwner = client.getEntityModels();
         }
         List<Vec3[]> faces = new ArrayList<>();
         MODELS.computeIfAbsent(layer, client.getEntityModels()::bakeLayer)
@@ -921,8 +916,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
-    /// Records the first entity or particle coverage over the threshold in a drawn frame, for
-    /// {@link #requireNoEntityFillsTheFrame}.
+    /// Records when the entities and particles of a drawn frame cover more than the threshold of
+    /// the frame between them, for {@link #requireNoEntityFillsTheFrame}.
     ///
     /// <p>Measures the render states the frame draws, after the frame's entities and particles are
     /// extracted with the camera already aligned for that frame ({@code GameRenderer.update} before
@@ -931,71 +926,418 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// client handles its packets every frame and ticks only when a tick is due ({@code
     /// Minecraft.java:1156-1180}), so a projectile added or moved by a packet is drawn before any
     /// tick hook can see it.
+    ///
+    /// <p>Every item is rasterised onto a coarse grid and what fails is their union, not any one
+    /// of them: the defect this check exists for was many overlapping crit squares, no one of
+    /// which would have failed alone. A particle is only counted where its sprite is drawn: the
+    /// quad of a sword's sweep, two blocks wide a block ahead of the player ({@code
+    /// Player.java:1178-1180}, {@code AttackSweepParticle.java:18}), covers half the frame while
+    /// its thin arc draws almost none of it. A particle whose sprite cannot be read counts as
+    /// opaque. {@code ElderGuardianParticleGroup} and {@code ItemPickupParticleGroup}, the other
+    /// {@code ParticleGroupRenderState} types, are not measured; neither is in the film. An
+    /// invisible entity draws nothing but a worn item ({@code ArmorStandRenderer}), so it is not
+    /// measured.
     private static void recordFrameCoverage(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
         Camera camera = context.camera();
         Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
         Vec3 eye = camera.position();
-        Vector3fc forward = camera.forwardVector();
+        Vector3fc forwardVector = camera.forwardVector();
+        Vec3 ahead = new Vec3(forwardVector.x(), forwardVector.y(), forwardVector.z());
+        coverageEpoch++;
+        int largest = 0;
+        String largestItem = null;
         for (EntityRenderState state : context.levelState().entityRenderStates) {
-            double covered =
-                    screenCoverage(viewProjection, forward, drawnFaces(client, state, eye));
-            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
-                LAST_FRAME_VIOLATION =
+            if (state.isInvisible) {
+                continue;
+            }
+            int cells = 0;
+            for (Vec3[] face : drawnFaces(client, state, eye)) {
+                int clipped = clipFace(face, null, null, ahead, viewProjection);
+                cells += rasterize(clipped, null, null, null);
+            }
+            if (cells > largest) {
+                largest = cells;
+                largestItem =
                         String.format(
                                 Locale.ROOT,
-                                "%s (age %.2f ticks) at %s covers %.0f%% of the frame from the"
-                                        + " camera at %s",
+                                "%s (age %.2f ticks) at %s",
                                 state.entityType,
                                 state.ageInTicks,
-                                new Vec3(state.x, state.y, state.z).subtract(eye),
-                                covered * 100.0,
-                                eye);
-                return;
+                                new Vec3(state.x, state.y, state.z).subtract(eye));
             }
         }
-        // A particle's quad is extracted relative to the camera (SingleQuadParticle.java:66-69),
-        // and buildLayer hands out the four corners the renderer draws. Only a particle within a
-        // block of the camera is measured: a sword's sweep is drawn a block ahead at half the
-        // player's height (Player.java:1178-1180) on a quad two blocks wide
-        // (AttackSweepParticle.java:18), a thin arc whose quad covers more than half the frame.
-        QuadCorners corners = new QuadCorners();
         for (ParticleGroupRenderState group : context.levelState().particlesRenderState.particles) {
-            if (group instanceof QuadParticleRenderState quads) {
-                for (SingleQuadParticle.Layer layer : quads.layers()) {
-                    quads.buildLayer(layer, corners);
+            if (!(group instanceof QuadParticleRenderState quads)) {
+                continue;
+            }
+            for (SingleQuadParticle.Layer layer : quads.layers()) {
+                QuadCoverage coverage = new QuadCoverage(client, layer, ahead, viewProjection);
+                quads.buildLayer(layer, coverage);
+                if (coverage.largest > largest) {
+                    largest = coverage.largest;
+                    largestItem = coverage.largestItem;
                 }
             }
         }
-        for (int first = 0; first + 3 < corners.points.size(); first += 4) {
-            Vec3[] quad = corners.points.subList(first, first + 4).toArray(Vec3[]::new);
-            Vec3 centre = quad[0].add(quad[1]).add(quad[2]).add(quad[3]).scale(0.25);
-            if (centre.lengthSqr() >= 1.0) {
-                continue;
-            }
-            double covered = screenCoverage(viewProjection, forward, List.<Vec3[]>of(quad));
-            if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
-                LAST_FRAME_VIOLATION =
-                        String.format(
-                                Locale.ROOT,
-                                "a particle at %s covers %.0f%% of the frame from the camera at %s",
-                                corners.points.get(first),
-                                covered * 100.0,
-                                eye);
-                return;
-            }
+        double covered = largestCoverage() / (double) (COVERAGE_GRID_WIDTH * COVERAGE_GRID_HEIGHT);
+        if (covered > MAX_ENTITY_SCREEN_COVERAGE) {
+            LAST_FRAME_VIOLATION =
+                    String.format(
+                            Locale.ROOT,
+                            "entities and particles cover %.0f%% of the frame from the camera at"
+                                    + " %s, largest item %s",
+                            covered * 100.0,
+                            eye,
+                            largestItem);
         }
     }
 
-    /// Collects the corners of the particle quads {@code QuadParticleRenderState.buildLayer} draws
-    /// ({@code QuadParticleRenderState.java:85-108} in the 26.3 sources), four to a quad.
-    private static final class QuadCorners implements VertexConsumer {
-        private final List<Vec3> points = new ArrayList<>();
+    /// The number of grid cells the frame has covered so far.
+    private static int largestCoverage() {
+        int cells = 0;
+        for (int cell : COVERAGE_GRID) {
+            if (cell == coverageEpoch) {
+                cells++;
+            }
+        }
+        return cells;
+    }
+
+    /// Clips a polygon at the camera's near plane and projects the vertices it keeps into the
+    /// raster scratch arrays. The input positions are relative to the camera; {@code paramA} and
+    /// {@code paramB} are the quad parameters of a particle's corners, or null for an opaque item.
+    /// Returns the clipped vertex count, zero when the polygon never reaches past the near plane.
+    ///
+    /// <p>The renderer draws each face clipped at the near plane, so a face that straddles the
+    /// plane is drawn from the plane outwards: a body a third of a block in front of the camera
+    /// fills the frame. Clipping first is what makes that measurable; projecting only the corners
+    /// in front would miss it, and treating every straddling face as full would fail a body beside
+    /// the lens.
+    private static int clipFace(
+            Vec3[] points, double[] paramA, double[] paramB, Vec3 ahead, Matrix4f viewProjection) {
+        int count = 0;
+        for (int index = 0; index < points.length && count < MAX_RASTER_VERTICES; index++) {
+            Vec3 a = points[index];
+            Vec3 b = points[(index + 1) % points.length];
+            double depthA = a.dot(ahead) - NEAR_PLANE;
+            double depthB = b.dot(ahead) - NEAR_PLANE;
+            if (depthA >= 0.0) {
+                projectVertex(a, paramA == null ? 0.0 : paramA[index], paramA == null ? 0.0 : paramB[index], viewProjection, count);
+                count++;
+            }
+            if ((depthA >= 0.0) != (depthB >= 0.0) && count < MAX_RASTER_VERTICES) {
+                double t = depthA / (depthA - depthB);
+                double pa = 0.0;
+                double pb = 0.0;
+                if (paramA != null) {
+                    pa = paramA[index] + t * (paramA[(index + 1) % points.length] - paramA[index]);
+                    pb = paramB[index] + t * (paramB[(index + 1) % points.length] - paramB[index]);
+                }
+                projectVertex(a.lerp(b, t), pa, pb, viewProjection, count);
+                count++;
+            }
+        }
+        if (count < 3) {
+            return 0;
+        }
+        for (int vertex = 0; vertex < count; vertex++) {
+            Vector4f projected =
+                    viewProjection.transform(
+                            new Vector4f(
+                                    (float) RWX[vertex], (float) RWY[vertex], (float) RWZ[vertex], 1.0F));
+            if (projected.w <= 0.0F) {
+                return 0;
+            }
+            RIW[vertex] = 1.0F / projected.w;
+            RNX[vertex] = projected.x * RIW[vertex];
+            RNY[vertex] = projected.y * RIW[vertex];
+        }
+        return count;
+    }
+
+    private static void projectVertex(
+            Vec3 point, double paramA, double paramB, Matrix4f ignored, int vertex) {
+        RWX[vertex] = point.x;
+        RWY[vertex] = point.y;
+        RWZ[vertex] = point.z;
+        RPA[vertex] = paramA;
+        RPB[vertex] = paramB;
+    }
+
+    /// Marks the grid cells a clipped, projected convex polygon covers. A convex polygon meets a
+    /// scanline in one span, so each row is filled between the edge crossings of its centre. Cells
+    /// outside the screen fall away by clamping. For a particle, {@code sprite} is its sprite (or
+    /// null to count it opaque) and a cell is only marked where the sprite's pixel at the cell is
+    /// drawn, read at the quad's UV interpolated into the cell. Returns the cells this item newly
+    /// covered.
+    private static int rasterize(
+            int count, QuadShape quad, net.minecraft.client.renderer.texture.SpriteContents sprite, double[] uvSpan) {
+        if (count < 3) {
+            return 0;
+        }
+        int marked = 0;
+        for (int row = 0; row < COVERAGE_GRID_HEIGHT; row++) {
+            double y = (row + 0.5) * 2.0 / COVERAGE_GRID_HEIGHT - 1.0;
+            double xMin = Double.MAX_VALUE;
+            double xMax = -Double.MAX_VALUE;
+            for (int vertex = 0; vertex < count; vertex++) {
+                int next = (vertex + 1) % count;
+                double y0 = RNY[vertex];
+                double y1 = RNY[next];
+                if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+                    double t = (y - y0) / (y1 - y0);
+                    double x = RNX[vertex] + t * (RNX[next] - RNX[vertex]);
+                    xMin = Math.min(xMin, x);
+                    xMax = Math.max(xMax, x);
+                }
+            }
+            if (xMin >= xMax) {
+                continue;
+            }
+            int first =
+                    Math.max(
+                            0,
+                            (int) Math.floor((xMin + 1.0) * 0.5 * COVERAGE_GRID_WIDTH - 0.5 + 1.0));
+            int last =
+                    Math.min(
+                            COVERAGE_GRID_WIDTH - 1,
+                            (int) Math.ceil((xMax + 1.0) * 0.5 * COVERAGE_GRID_WIDTH - 0.5 - 1.0));
+            for (int col = first; col <= last; col++) {
+                double x = (col + 0.5) * 2.0 / COVERAGE_GRID_WIDTH - 1.0;
+                if (x < xMin || x > xMax) {
+                    continue;
+                }
+                if (quad != null && sprite != null && uvSpan != null) {
+                    double[] ab = quad.inverseBilinear(x, y);
+                    if (ab == null) {
+                        continue;
+                    }
+                    double u = uvSpan[0] + ab[0] * (uvSpan[1] - uvSpan[0]);
+                    double v = uvSpan[3] + ab[1] * (uvSpan[2] - uvSpan[3]);
+                    int px =
+                            Math.min(
+                                    sprite.width() - 1,
+                                    Math.max(0, (int) Math.round(u * sprite.width() - 0.5)));
+                    int py =
+                            Math.min(
+                                    sprite.height() - 1,
+                                    Math.max(0, (int) Math.round(v * sprite.height() - 0.5)));
+                    if (sprite.isTransparent(0, px, py)) {
+                        continue;
+                    }
+                }
+                int cell = row * COVERAGE_GRID_WIDTH + col;
+                if (COVERAGE_GRID[cell] != coverageEpoch) {
+                    COVERAGE_GRID[cell] = coverageEpoch;
+                    marked++;
+                }
+            }
+        }
+        return marked;
+    }
+
+    /// One particle quad's projected corners, for the inverse bilinear lookup that reads a cell's
+    /// UV: corner 0 sits at parameters (1, 0), corner 1 at (1, 1), corner 2 at (0, 1) and corner
+    /// 3 at (0, 0), the vertex order {@code QuadParticleRenderState.renderRotatedQuad} emits
+    /// ({@code QuadParticleRenderState.java:76-81} in the 26.3 sources). The bilinear inversion is
+    /// Newton's from the centre; a quad's projection is close to planar, so three iterations are
+    /// far inside a cell.
+    private static final class QuadShape {
+        private final double[] xs;
+        private final double[] ys;
+
+        private QuadShape(double[] xs, double[] ys) {
+            this.xs = xs;
+            this.ys = ys;
+        }
+
+        /// The (a, b) parameters of the screen point (x, y) in normalised device coordinates, or
+        /// null when the point is outside the quad or the inversion does not converge.
+        private double[] inverseBilinear(double x, double y) {
+            double a0 = xs[3];
+            double bx = xs[2] - xs[3];
+            double cx = xs[0] - xs[3];
+            double dx = xs[1] - xs[2] - xs[0] + xs[3];
+            double e0 = ys[3];
+            double fy = ys[2] - ys[3];
+            double gx = ys[0] - ys[3];
+            double hx = ys[1] - ys[2] - ys[0] + ys[3];
+            double a = 0.5;
+            double b = 0.5;
+            for (int iteration = 0; iteration < 6; iteration++) {
+                double px = a0 + bx * b + cx * a + dx * a * b - x;
+                double py = e0 + fy * b + gx * a + hx * a * b - y;
+                if (px * px + py * py < 1.0E-12) {
+                    break;
+                }
+                double dpa = cx + dx * b;
+                double dpb = bx + dx * a;
+                double dqa = gx + hx * b;
+                double dqb = fy + hx * a;
+                double determinant = dpa * dqb - dpb * dqa;
+                if (Math.abs(determinant) < 1.0E-12) {
+                    return null;
+                }
+                double da = (px * dqb - py * dpb) / determinant;
+                double db = (py * dpa - px * dqa) / determinant;
+                a -= da;
+                b -= db;
+            }
+            if (!(a >= -0.01 && a <= 1.01 && b >= -0.01 && b <= 1.01)) {
+                return null;
+            }
+            return new double[] {Math.min(1.0, Math.max(0.0, a)), Math.min(1.0, Math.max(0.0, b))};
+        }
+    }
+
+    /// Collects the particle quads {@code QuadParticleRenderState.buildLayer} emits ({@code
+    /// QuadParticleRenderState.java:85-108} in the 26.3 sources), four corners to a quad, and
+    /// rasterises each as it completes: positions relative to the camera ({@code
+    /// SingleQuadParticle.java:66-69}), with the UV the renderer interpolates over the quad.
+    private static final class QuadCoverage implements VertexConsumer {
+        private final Minecraft client;
+        private final SingleQuadParticle.Layer layer;
+        private final Vec3 ahead;
+        private final Matrix4f viewProjection;
+        private final Map<String, net.minecraft.client.renderer.texture.TextureAtlasSprite> sprites =
+                new HashMap<>();
+        private int vertex;
+        private int largest;
+        private String largestItem;
+
+        private QuadCoverage(
+                Minecraft client, SingleQuadParticle.Layer layer, Vec3 ahead, Matrix4f viewProjection) {
+            this.client = client;
+            this.layer = layer;
+            this.ahead = ahead;
+            this.viewProjection = viewProjection;
+        }
 
         @Override
         public VertexConsumer addVertex(float x, float y, float z) {
-            points.add(new Vec3(x, y, z));
+            QX[vertex] = x;
+            QY[vertex] = y;
+            QZ[vertex] = z;
             return this;
+        }
+
+        @Override
+        public VertexConsumer setUv(float u, float v) {
+            QU[vertex] = u;
+            QV[vertex] = v;
+            vertex++;
+            if (vertex == 4) {
+                vertex = 0;
+                rasterizeQuad();
+            }
+            return this;
+        }
+
+        private void rasterizeQuad() {
+            Vec3[] corners = new Vec3[4];
+            double[] paramA = new double[4];
+            double[] paramB = new double[4];
+            for (int index = 0; index < 4; index++) {
+                corners[index] = new Vec3(QX[index], QY[index], QZ[index]);
+            }
+            paramA[0] = 1.0;
+            paramA[1] = 1.0;
+            paramA[2] = 0.0;
+            paramA[3] = 0.0;
+            paramB[0] = 0.0;
+            paramB[1] = 1.0;
+            paramB[2] = 1.0;
+            paramB[3] = 0.0;
+            int clipped = clipFace(corners, paramA, paramB, ahead, viewProjection);
+            if (clipped < 3) {
+                return;
+            }
+            double u0 = Math.min(Math.min(QU[0], QU[1]), Math.min(QU[2], QU[3]));
+            double u1 = Math.max(Math.max(QU[0], QU[1]), Math.max(QU[2], QU[3]));
+            double v0 = Math.min(Math.min(QV[0], QV[1]), Math.min(QV[2], QV[3]));
+            double v1 = Math.max(Math.max(QV[0], QV[1]), Math.max(QV[2], QV[3]));
+            double[] uvSpan = {u0, u1, v0, v1};
+            // The inverse lookup reads the unclipped projected corners: a cell that lies inside
+            // the clipped polygon but outside the projected quad has no UV, and is left out of
+            // the count rather than guessed.
+            double[] xs = {RNX[0], RNX[1], RNX[2], RNX[3]};
+            double[] ys = {RNY[0], RNY[1], RNY[2], RNY[3]};
+            QuadShape shape = clipped == 4 ? new QuadShape(xs, ys) : null;
+            net.minecraft.client.renderer.texture.TextureAtlasSprite atlasSprite =
+                    spriteFor(u0, u1, v0, v1);
+            int cells =
+                    rasterize(
+                            clipped,
+                            shape,
+                            atlasSprite == null ? null : atlasSprite.contents(),
+                            shape == null ? null : uvSpan);
+            if (cells > largest) {
+                largest = cells;
+                largestItem =
+                        String.format(
+                                Locale.ROOT,
+                                "a particle at (%.2f, %.2f, %.2f)",
+                                (QX[0] + QX[1] + QX[2] + QX[3]) / 4.0,
+                                (QY[0] + QY[1] + QY[2] + QY[3]) / 4.0,
+                                (QZ[0] + QZ[1] + QZ[2] + QZ[3]) / 4.0);
+            }
+        }
+
+        /// The sprite of the quad's layer that holds the quad's UV rectangle, or null when the
+        /// sprite cannot be read: the quad then counts as opaque. The atlas keeps its sprites
+        /// private, so the list is read once per atlas through reflection.
+        private net.minecraft.client.renderer.texture.TextureAtlasSprite spriteFor(
+                double u0, double u1, double v0, double v1) {
+            String key =
+                    String.format(Locale.ROOT, "%.5f,%.5f,%.5f,%.5f", u0, v0, u1 - u0, v1 - v0);
+            if (sprites.containsKey(key)) {
+                return sprites.get(key);
+            }
+            net.minecraft.client.renderer.texture.TextureAtlasSprite found = null;
+            for (net.minecraft.client.renderer.texture.TextureAtlasSprite sprite : atlasSprites()) {
+                if (u0 >= sprite.getU0() - 1.0E-4
+                        && u1 <= sprite.getU1() + 1.0E-4
+                        && v0 >= sprite.getV0() - 1.0E-4
+                        && v1 <= sprite.getV1() + 1.0E-4) {
+                    found = sprite;
+                    break;
+                }
+            }
+            sprites.put(key, found);
+            return found;
+        }
+
+        private List<net.minecraft.client.renderer.texture.TextureAtlasSprite> atlasSprites() {
+            net.minecraft.client.renderer.texture.AbstractTexture texture =
+                    client.getTextureManager().getTexture(layer.textureAtlasLocation());
+            if (!(texture
+                    instanceof net.minecraft.client.renderer.texture.TextureAtlas atlas)) {
+                return List.of();
+            }
+            List<net.minecraft.client.renderer.texture.TextureAtlasSprite> cached =
+                    ATLAS_SPRITES.get(atlas);
+            if (cached != null) {
+                return cached;
+            }
+            List<net.minecraft.client.renderer.texture.TextureAtlasSprite> list = List.of();
+            if (!atlasSpritesBroken) {
+                try {
+                    java.lang.reflect.Field field =
+                            net.minecraft.client.renderer.texture.TextureAtlas.class
+                                    .getDeclaredField("sprites");
+                    field.setAccessible(true);
+                    list =
+                            List.copyOf(
+                                    (List<net.minecraft.client.renderer.texture.TextureAtlasSprite>)
+                                            field.get(atlas));
+                } catch (ReflectiveOperationException | ClassCastException failure) {
+                    atlasSpritesBroken = true;
+                    list = List.of();
+                }
+            }
+            ATLAS_SPRITES.put(atlas, list);
+            return list;
         }
 
         @Override
@@ -1005,11 +1347,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
         @Override
         public VertexConsumer setColor(int color) {
-            return this;
-        }
-
-        @Override
-        public VertexConsumer setUv(float u, float v) {
             return this;
         }
 
@@ -1040,9 +1377,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     }
 
     /// The faces the renderer draws for a render state, relative to the camera. An arrow or a
-    /// trident is measured by its own model, which reaches far behind its position (see {@link
-    /// #hideProjectilesAtTheLens}), so its box misses the tail drawn at the lens. Any other entity
-    /// is measured by its box.
+    /// trident is measured by its own model, which reaches far behind its position (an arrow 0.68
+    /// of a block, {@code ArrowModel.java:23-31}; a trident 1.69, its 27-pixel pole, {@code
+    /// TridentModel.java:24}), so its box misses the tail drawn at the lens. Any other entity is
+    /// measured by its box.
     private static List<Vec3[]> drawnFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
         List<Vec3[]> model = modelFaces(client, state, eye);
         if (model != null) {
@@ -1074,61 +1412,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     });
         }
         return faces;
-    }
-
-    /// The fraction of the screen a set of faces covers, from the faces clipped against the near
-    /// plane and projected through the camera. Points are relative to the camera.
-    ///
-    /// <p>The renderer draws each face clipped at the near plane, so a face that straddles the
-    /// plane is drawn from the plane outwards: a body a third of a block in front of the camera
-    /// fills the frame. Clipping first is what makes that measurable; projecting only the corners
-    /// in front would miss it, and treating every straddling face as full would fail a body beside
-    /// the lens.
-    private static double screenCoverage(
-            Matrix4f viewProjection, Vector3fc forward, List<Vec3[]> faces) {
-        Vec3 ahead = new Vec3(forward.x(), forward.y(), forward.z());
-        List<Vec3> clipped = new ArrayList<>();
-        for (Vec3[] face : faces) {
-            for (int index = 0; index < face.length; index++) {
-                Vec3 a = face[index];
-                Vec3 b = face[(index + 1) % face.length];
-                double depthA = a.dot(ahead) - NEAR_PLANE;
-                double depthB = b.dot(ahead) - NEAR_PLANE;
-                if (depthA >= 0.0) {
-                    clipped.add(a);
-                }
-                if ((depthA >= 0.0) != (depthB >= 0.0)) {
-                    clipped.add(a.lerp(b, depthA / (depthA - depthB)));
-                }
-            }
-        }
-        double minX = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE;
-        double minY = Double.MAX_VALUE;
-        double maxY = -Double.MAX_VALUE;
-        for (Vec3 point : clipped) {
-            Vector4f projected =
-                    viewProjection.transform(
-                            new Vector4f((float) point.x, (float) point.y, (float) point.z, 1.0F));
-            if (projected.w <= 0.0F) {
-                continue;
-            }
-            double x = projected.x / projected.w;
-            double y = projected.y / projected.w;
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-        }
-        if (minX > maxX || minY > maxY) {
-            return 0.0;
-        }
-        double width = Math.min(1.0, maxX) - Math.max(-1.0, minX);
-        double height = Math.min(1.0, maxY) - Math.max(-1.0, minY);
-        if (width <= 0.0 || height <= 0.0) {
-            return 0.0;
-        }
-        return width * height / 4.0;
     }
 
     /// Runs the half of a player's tick that a real client's connection runs for it.
@@ -1347,6 +1630,84 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestPlayerActions.lookAt(context, view);
     }
 
+    /// Spawns the invisible armor stand the bow, crossbow, firework and trident stages are filmed
+    /// through. It stands 1.8 blocks beside the shooter and a block behind {@link #RANGE_STAND},
+    /// looking at a point halfway between the shooter and the target: close enough that the
+    /// shooter fills the left of the frame, and sideways of the line of fire, so a crit arrow's
+    /// trail, which drifts back along that line ({@code AbstractArrow.java:226-238} and {@code
+    /// CritParticle.java:20-28} in the 26.3 sources), passes blocks from the lens. First person
+    /// cannot keep that trail off the lens: the arrow spawns at the eye and each tick's four crits
+    /// spawn on its path and drift back along it for about four blocks. The stand is invisible, so
+    /// it draws nothing itself, and it is not a projectile's target: it never takes a hit.
+    private static UUID spawnRangeCameraStand(MinecraftServer server, Vec3 target) {
+        ServerLevel level = server.overworld();
+        ArmorStand stand = EntityTypes.ARMOR_STAND.create(level, EntitySpawnReason.COMMAND);
+        if (stand == null) {
+            throw new AssertionError("Expected to create the camera armor stand");
+        }
+        Vec3 position = RANGE_STAND.add(1.8, 0.0, -1.0);
+        stand.setPos(position.x, position.y, position.z);
+        Vec3 midpoint = RANGE_STAND.add(target).scale(0.5).add(0.0, 0.9, 0.0);
+        stand.lookAt(EntityAnchorArgument.Anchor.EYES, midpoint);
+        stand.setInvisible(true);
+        stand.setNoGravity(true);
+        stand.setPermanentlyInvulnerable(true);
+        level.addFreshEntity(stand);
+        return stand.getUUID();
+    }
+
+    /// Switches the client camera to the armor stand beside the shooter, so the stage is filmed
+    /// from beside it. The camera is a viewpoint, not game behaviour: {@code
+    /// Minecraft.setCameraEntity} is the vanilla client's own switch, and every input still goes
+    /// through the recording player's real keys. The {@code Gui} draws the hotbar and hearts only
+    /// for a Player camera ({@code Hud.java:728} in the 26.3 sources), so these stages show
+    /// neither; the captions carry the shot count and the target's health instead. Vanilla also
+    /// never draws the local player while the camera is not it ({@code LevelExtractor.java:269-270}
+    /// in the 26.3 sources), so the shooter is invisible; its first-person hands and bow are
+    /// drawn, as vanilla draws them for a non-player camera ({@code GameRenderer.java:377-380}).
+    private static void enterRangeCamera(
+            ClientGameTestContext context, TestDedicatedServerContext server, UUID standId) {
+        context.waitFor(
+                client -> {
+                    for (Entity entity : client.level.entitiesForRendering()) {
+                        if (entity.getUUID().equals(standId)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                200);
+        context.runOnClient(
+                client -> {
+                    for (Entity entity : client.level.entitiesForRendering()) {
+                        if (entity.getUUID().equals(standId)) {
+                            client.setCameraEntity(entity);
+                            return;
+                        }
+                    }
+                    throw new AssertionError("Expected the camera armor stand on the client");
+                });
+        // The camera's eye height lerps to the stand's over a few ticks (Camera.java:82-83 in the
+        // 26.3 sources); the frames of that slide are before the next marker, so the cut drops
+        // them.
+        context.waitTicks(6);
+        requireKeysOverlay(context);
+    }
+
+    /// Puts the camera back on the recording player and removes the armor stand.
+    private static void leaveRangeCamera(
+            ClientGameTestContext context, TestDedicatedServerContext server, UUID standId) {
+        context.runOnClient(client -> client.setCameraEntity(client.player));
+        server.runOnServer(
+                current -> {
+                    Entity stand = current.overworld().getEntity(standId);
+                    if (stand != null) {
+                        stand.discard();
+                    }
+                });
+    }
+
+
     private static void setDamageRules(
             MinecraftServer server, boolean disableIFrames, boolean disableAttackCooldown) {
         GameRules rules = server.overworld().getGameRules();
@@ -1548,6 +1909,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        rangeCameraStand =
+                server.computeOnServer(
+                        current -> spawnRangeCameraStand(current, RANGE_TARGET));
+        enterRangeCamera(context, server, rangeCameraStand);
         // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
         // while the client's carried item is empty, whatever the server's main hand holds.
         context.getInput().pressKey(options -> options.keyHotbarSlots[0]);
