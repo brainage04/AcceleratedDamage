@@ -1308,6 +1308,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return found;
         }
 
+        @SuppressWarnings("unchecked")
         private List<net.minecraft.client.renderer.texture.TextureAtlasSprite> atlasSprites() {
             net.minecraft.client.renderer.texture.AbstractTexture texture =
                     client.getTextureManager().getTexture(layer.textureAtlasLocation());
