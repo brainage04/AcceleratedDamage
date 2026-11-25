@@ -134,6 +134,25 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
+    /// How far outside a particle quad the inverse bilinear lookup may land and still count the
+    /// cell. The raster samples cell centres, so a small margin absorbs rounding at the edges.
+    private static final double QUAD_UV_MARGIN = 0.01;
+
+    /// Newton steps for the inverse bilinear lookup. Three iterations already land far inside a
+    /// cell for the near-planar quads the renderer draws; the extra steps are cheap and keep the
+    /// lookup inside the margin at the lens.
+    private static final int BILINEAR_ITERATIONS = 6;
+
+    /// Residual and Jacobian bounds that stop the Newton iteration and reject a singular quad.
+    private static final double BILINEAR_EPSILON = 1.0E-12;
+
+    /// UV tolerance when matching a quad's atlas rectangle to one sprite, and when deciding whether
+    /// the sprite's UV span is usable.
+    private static final double SPRITE_UV_TOLERANCE = 1.0E-4;
+
+    /// Server ticks allowed for every input of a half to reach the target before the check fails.
+    private static final int INPUT_WAIT_TICKS = 60;
+
     /// The frame's coverage is rasterised onto this grid, in cells across and down: a quarter of
     /// the frame is thirteen and a half rows of one or twenty-four columns of the other, far finer
     /// than the bound needs to be.
@@ -172,6 +191,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final double[] RIW = new double[MAX_RASTER_VERTICES];
     private static final double[] RPA = new double[MAX_RASTER_VERTICES];
     private static final double[] RPB = new double[MAX_RASTER_VERTICES];
+
+    /// The four unclipped projected corners of one particle quad, kept for the UV lookup: clipping
+    /// changes the raster polygon but must not change which sprite pixel a cell samples.
+    private static final double[] QSX = new double[4];
+
+    private static final double[] QSY = new double[4];
+
+    /// Scratch matrix, projection and bilinear result, reused every frame and every cell.
+    private static final Matrix4f VIEW_PROJECTION = new Matrix4f();
+
+    private static final Vector4f PROJECTED = new Vector4f();
+    private static final double[] UV_RESULT = new double[2];
+
+    private static final double[] UV_SPAN = new double[4];
+    private static final QuadShape QUAD_SHAPE = new QuadShape();
 
     /// One particle quad's corners and UV parameters as {@code buildLayer} emits them, render
     /// thread only.
@@ -622,6 +656,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         ClientGameTestRecorder.placePerformanceOverlay(
                                 context, PerformanceOverlayPlacement.HIDDEN);
                         requireKeysOverlay(context);
+                        String spriteAlpha =
+                                context.computeOnClient(
+                                        AcceleratedDamageClientGameTest::spriteAlphaMappingFailure);
+                        if (spriteAlpha != null) {
+                            throw new AssertionError(
+                                    "Expected the sprite alpha path to count an opaque particle quad: "
+                                            + spriteAlpha);
+                        }
                         // The film is cut to its stage markers, so the first marker has to be the
                         // first frame worth showing. The tour that loads every viewpoint runs
                         // before any marker, and the title card goes up on the melee scene, which
@@ -709,6 +751,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         }
                         TRACKED.clear();
                         publishTrackedIds();
+                        requireNoEntityFillsTheFrame("showcase.final");
                         server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                     }
                 });
@@ -927,6 +970,96 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         }
     }
 
+    /// Proves the alpha path counts an opaque textured particle quad. It rasterises one
+    /// screen-filling quad whose atlas UV is pinned to an opaque sprite pixel. The atlas coordinate
+    /// itself points at a different, transparent pixel, so the old atlas-UV readout counts no cell
+    /// while the sprite-local mapping counts the whole quad. Returns a violation, or null when the
+    /// path works.
+    @SuppressWarnings("unchecked")
+    private static String spriteAlphaMappingFailure(Minecraft client) {
+        try {
+            net.minecraft.client.renderer.texture.AbstractTexture texture =
+                    client.getTextureManager()
+                            .getTexture(
+                                    SingleQuadParticle.Layer.TRANSLUCENT.textureAtlasLocation());
+            if (!(texture instanceof net.minecraft.client.renderer.texture.TextureAtlas atlas)) {
+                return "no particle texture atlas";
+            }
+            java.lang.reflect.Field field =
+                    net.minecraft.client.renderer.texture.TextureAtlas.class.getDeclaredField(
+                            "sprites");
+            field.setAccessible(true);
+            List<net.minecraft.client.renderer.texture.TextureAtlasSprite> sprites =
+                    (List<net.minecraft.client.renderer.texture.TextureAtlasSprite>)
+                            field.get(atlas);
+            for (net.minecraft.client.renderer.texture.TextureAtlasSprite sprite : sprites) {
+                net.minecraft.client.renderer.texture.SpriteContents contents = sprite.contents();
+                com.mojang.blaze3d.platform.NativeImage image = spriteImage(contents);
+                if (image == null || contents.width() < 2 || contents.height() < 2) {
+                    continue;
+                }
+                int px = contents.width() / 2;
+                int py = contents.height() / 2;
+                if (net.minecraft.util.ARGB.alpha(image.getPixel(px, py)) != 255) {
+                    continue;
+                }
+                double u =
+                        sprite.getU0()
+                                + (px + 0.5) / contents.width() * (sprite.getU1() - sprite.getU0());
+                double v =
+                        sprite.getV0()
+                                + (py + 0.5)
+                                        / contents.height()
+                                        * (sprite.getV1() - sprite.getV0());
+                int oldPx =
+                        Math.min(
+                                contents.width() - 1,
+                                Math.max(0, (int) Math.round(u * contents.width() - 0.5)));
+                int oldPy =
+                        Math.min(
+                                contents.height() - 1,
+                                Math.max(0, (int) Math.round(v * contents.height() - 0.5)));
+                if (net.minecraft.util.ARGB.alpha(image.getPixel(oldPx, oldPy)) == 255) {
+                    continue;
+                }
+                QSX[0] = -0.8;
+                QSY[0] = -0.8;
+                QSX[1] = 0.8;
+                QSY[1] = -0.8;
+                QSX[2] = 0.8;
+                QSY[2] = 0.8;
+                QSX[3] = -0.8;
+                QSY[3] = 0.8;
+                for (int corner = 0; corner < 4; corner++) {
+                    RNX[corner] = QSX[corner];
+                    RNY[corner] = QSY[corner];
+                }
+                UV_SPAN[0] = u;
+                UV_SPAN[1] = u;
+                UV_SPAN[2] = v;
+                UV_SPAN[3] = v;
+                coverageEpoch++;
+                int cells = rasterize(4, QUAD_SHAPE, sprite, UV_SPAN);
+                coverageEpoch++;
+                if (cells == 0) {
+                    return "the opaque pixel at "
+                            + px
+                            + ","
+                            + py
+                            + " counted no cell; the atlas pixel "
+                            + oldPx
+                            + ","
+                            + oldPy
+                            + " is transparent";
+                }
+                return null;
+            }
+            return "no particle sprite has an opaque centre and a transparent atlas-mapped pixel";
+        } catch (ReflectiveOperationException failure) {
+            return "the particle atlas sprites could not be read: " + failure;
+        }
+    }
+
     /// Records when the entities and particles of a drawn frame cover more than the threshold of
     /// the frame between them, for {@link #requireNoEntityFillsTheFrame}.
     ///
@@ -950,7 +1083,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void recordFrameCoverage(LevelExtractionContext context) {
         Minecraft client = Minecraft.getInstance();
         Camera camera = context.camera();
-        Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(new Matrix4f());
+        Matrix4f viewProjection = camera.getViewRotationProjectionMatrix(VIEW_PROJECTION);
         Vec3 eye = camera.position();
         Vector3fc forwardVector = camera.forwardVector();
         Vec3 ahead = new Vec3(forwardVector.x(), forwardVector.y(), forwardVector.z());
@@ -1034,10 +1167,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             double depthB = b.dot(ahead) - NEAR_PLANE;
             if (depthA >= 0.0) {
                 projectVertex(
-                        a,
+                        a.x,
+                        a.y,
+                        a.z,
                         paramA == null ? 0.0 : paramA[index],
                         paramA == null ? 0.0 : paramB[index],
-                        viewProjection,
                         count);
                 count++;
             }
@@ -1049,7 +1183,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     pa = paramA[index] + t * (paramA[(index + 1) % points.length] - paramA[index]);
                     pb = paramB[index] + t * (paramB[(index + 1) % points.length] - paramB[index]);
                 }
-                projectVertex(a.lerp(b, t), pa, pb, viewProjection, count);
+                projectVertex(
+                        a.x + (b.x - a.x) * t,
+                        a.y + (b.y - a.y) * t,
+                        a.z + (b.z - a.z) * t,
+                        pa,
+                        pb,
+                        count);
                 count++;
             }
         }
@@ -1057,30 +1197,43 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return 0;
         }
         for (int vertex = 0; vertex < count; vertex++) {
-            Vector4f projected =
-                    viewProjection.transform(
-                            new Vector4f(
-                                    (float) RWX[vertex],
-                                    (float) RWY[vertex],
-                                    (float) RWZ[vertex],
-                                    1.0F));
-            if (projected.w <= 0.0F) {
+            PROJECTED.set((float) RWX[vertex], (float) RWY[vertex], (float) RWZ[vertex], 1.0F);
+            viewProjection.transform(PROJECTED);
+            if (PROJECTED.w <= 0.0F) {
                 return 0;
             }
-            RIW[vertex] = 1.0F / projected.w;
-            RNX[vertex] = projected.x * RIW[vertex];
-            RNY[vertex] = projected.y * RIW[vertex];
+            RIW[vertex] = 1.0F / PROJECTED.w;
+            RNX[vertex] = PROJECTED.x * RIW[vertex];
+            RNY[vertex] = PROJECTED.y * RIW[vertex];
         }
         return count;
     }
 
     private static void projectVertex(
-            Vec3 point, double paramA, double paramB, Matrix4f ignored, int vertex) {
-        RWX[vertex] = point.x;
-        RWY[vertex] = point.y;
-        RWZ[vertex] = point.z;
+            double x, double y, double z, double paramA, double paramB, int vertex) {
+        RWX[vertex] = x;
+        RWY[vertex] = y;
+        RWZ[vertex] = z;
         RPA[vertex] = paramA;
         RPB[vertex] = paramB;
+    }
+
+    /// Projects the four unclipped corners into the UV scratch arrays. A corner behind the camera
+    /// has no screen position, so the caller then leaves the quad fully opaque rather than guess
+    /// its sprite pixels.
+    private static boolean projectQuadCorners(Vec3[] corners, Matrix4f viewProjection) {
+        for (int vertex = 0; vertex < 4; vertex++) {
+            Vec3 corner = corners[vertex];
+            PROJECTED.set((float) corner.x, (float) corner.y, (float) corner.z, 1.0F);
+            viewProjection.transform(PROJECTED);
+            if (PROJECTED.w <= 0.0F) {
+                return false;
+            }
+            float inverse = 1.0F / PROJECTED.w;
+            QSX[vertex] = PROJECTED.x * inverse;
+            QSY[vertex] = PROJECTED.y * inverse;
+        }
+        return true;
     }
 
     /// Whether the sprite's pixel at (x, y) is opaque. A particle is measured for what it hides: a
@@ -1132,7 +1285,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static int rasterize(
             int count,
             QuadShape quad,
-            net.minecraft.client.renderer.texture.SpriteContents sprite,
+            net.minecraft.client.renderer.texture.TextureAtlasSprite atlasSprite,
             double[] uvSpan) {
         if (count < 3) {
             return 0;
@@ -1169,23 +1322,32 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 if (x < xMin || x > xMax) {
                     continue;
                 }
-                if (quad != null && sprite != null && uvSpan != null) {
-                    double[] ab = quad.inverseBilinear(x, y);
-                    if (ab == null) {
+                if (quad != null && atlasSprite != null) {
+                    if (!quad.inverseBilinear(x, y)) {
                         continue;
                     }
-                    double u = uvSpan[0] + ab[0] * (uvSpan[1] - uvSpan[0]);
-                    double v = uvSpan[3] + ab[1] * (uvSpan[2] - uvSpan[3]);
-                    int px =
-                            Math.min(
-                                    sprite.width() - 1,
-                                    Math.max(0, (int) Math.round(u * sprite.width() - 0.5)));
-                    int py =
-                            Math.min(
-                                    sprite.height() - 1,
-                                    Math.max(0, (int) Math.round(v * sprite.height() - 0.5)));
-                    if (!spriteOpaque(sprite, px, py)) {
-                        continue;
+                    double u = uvSpan[0] + UV_RESULT[0] * (uvSpan[1] - uvSpan[0]);
+                    double v = uvSpan[3] + UV_RESULT[1] * (uvSpan[2] - uvSpan[3]);
+                    double uSpan = atlasSprite.getU1() - atlasSprite.getU0();
+                    double vSpan = atlasSprite.getV1() - atlasSprite.getV0();
+                    if (uSpan > SPRITE_UV_TOLERANCE && vSpan > SPRITE_UV_TOLERANCE) {
+                        // The renderer's UVs are atlas coordinates; the image is indexed from the
+                        // sprite's own corner (TextureAtlasSprite.java:30-33, 26.3).
+                        double localU = (u - atlasSprite.getU0()) / uSpan;
+                        double localV = (v - atlasSprite.getV0()) / vSpan;
+                        net.minecraft.client.renderer.texture.SpriteContents sprite =
+                                atlasSprite.contents();
+                        int px =
+                                Math.min(
+                                        sprite.width() - 1,
+                                        Math.max(0, (int) Math.floor(localU * sprite.width())));
+                        int py =
+                                Math.min(
+                                        sprite.height() - 1,
+                                        Math.max(0, (int) Math.floor(localV * sprite.height())));
+                        if (!spriteOpaque(sprite, px, py)) {
+                            continue;
+                        }
                     }
                 }
                 int cell = row * COVERAGE_GRID_WIDTH + col;
@@ -1205,31 +1367,25 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// from the centre; a quad's projection is close to planar, so three iterations are far inside
     /// a cell.
     private static final class QuadShape {
-        private final double[] xs;
-        private final double[] ys;
-
-        private QuadShape(double[] xs, double[] ys) {
-            this.xs = xs;
-            this.ys = ys;
-        }
-
-        /// The (a, b) parameters of the screen point (x, y) in normalised device coordinates, or
-        /// null when the point is outside the quad or the inversion does not converge.
-        private double[] inverseBilinear(double x, double y) {
-            double a0 = xs[3];
-            double bx = xs[2] - xs[3];
-            double cx = xs[0] - xs[3];
-            double dx = xs[1] - xs[2] - xs[0] + xs[3];
-            double e0 = ys[3];
-            double fy = ys[2] - ys[3];
-            double gx = ys[0] - ys[3];
-            double hx = ys[1] - ys[2] - ys[0] + ys[3];
+        /// The (a, b) parameters of the screen point (x, y) in normalised device coordinates are
+        /// written to {@link #UV_RESULT}, or false when the point is outside the quad or the
+        /// inversion does not converge. The corners are the unclipped projected corners in {@link
+        /// #QSX}/{@link #QSY}, so clipping cannot change which sprite pixel a cell samples.
+        private boolean inverseBilinear(double x, double y) {
+            double a0 = QSX[3];
+            double bx = QSX[2] - QSX[3];
+            double cx = QSX[0] - QSX[3];
+            double dx = QSX[1] - QSX[2] - QSX[0] + QSX[3];
+            double e0 = QSY[3];
+            double fy = QSY[2] - QSY[3];
+            double gx = QSY[0] - QSY[3];
+            double hx = QSY[1] - QSY[2] - QSY[0] + QSY[3];
             double a = 0.5;
             double b = 0.5;
-            for (int iteration = 0; iteration < 6; iteration++) {
+            for (int iteration = 0; iteration < BILINEAR_ITERATIONS; iteration++) {
                 double px = a0 + bx * b + cx * a + dx * a * b - x;
                 double py = e0 + fy * b + gx * a + hx * a * b - y;
-                if (px * px + py * py < 1.0E-12) {
+                if (px * px + py * py < BILINEAR_EPSILON) {
                     break;
                 }
                 double dpa = cx + dx * b;
@@ -1237,18 +1393,23 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 double dqa = gx + hx * b;
                 double dqb = fy + hx * a;
                 double determinant = dpa * dqb - dpb * dqa;
-                if (Math.abs(determinant) < 1.0E-12) {
-                    return null;
+                if (Math.abs(determinant) < BILINEAR_EPSILON) {
+                    return false;
                 }
                 double da = (px * dqb - py * dpb) / determinant;
                 double db = (py * dpa - px * dqa) / determinant;
                 a -= da;
                 b -= db;
             }
-            if (!(a >= -0.01 && a <= 1.01 && b >= -0.01 && b <= 1.01)) {
-                return null;
+            if (!(a >= -QUAD_UV_MARGIN
+                    && a <= 1.0 + QUAD_UV_MARGIN
+                    && b >= -QUAD_UV_MARGIN
+                    && b <= 1.0 + QUAD_UV_MARGIN)) {
+                return false;
             }
-            return new double[] {Math.min(1.0, Math.max(0.0, a)), Math.min(1.0, Math.max(0.0, b))};
+            UV_RESULT[0] = Math.min(1.0, Math.max(0.0, a));
+            UV_RESULT[1] = Math.min(1.0, Math.max(0.0, b));
+            return true;
         }
     }
 
@@ -1313,6 +1474,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             paramB[1] = 1.0;
             paramB[2] = 1.0;
             paramB[3] = 0.0;
+            // The UV lookup needs the four original projected corners: clipping changes the raster
+            // polygon, not which sprite pixel a screen point samples.
+            boolean projected = projectQuadCorners(corners, viewProjection);
             int clipped = clipFace(corners, paramA, paramB, ahead, viewProjection);
             if (clipped < 3) {
                 return;
@@ -1321,21 +1485,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             double u1 = Math.max(Math.max(QU[0], QU[1]), Math.max(QU[2], QU[3]));
             double v0 = Math.min(Math.min(QV[0], QV[1]), Math.min(QV[2], QV[3]));
             double v1 = Math.max(Math.max(QV[0], QV[1]), Math.max(QV[2], QV[3]));
-            double[] uvSpan = {u0, u1, v0, v1};
-            // The inverse lookup reads the unclipped projected corners: a cell that lies inside
-            // the clipped polygon but outside the projected quad has no UV, and is left out of
-            // the count rather than guessed.
-            double[] xs = {RNX[0], RNX[1], RNX[2], RNX[3]};
-            double[] ys = {RNY[0], RNY[1], RNY[2], RNY[3]};
-            QuadShape shape = clipped == 4 ? new QuadShape(xs, ys) : null;
+            UV_SPAN[0] = u0;
+            UV_SPAN[1] = u1;
+            UV_SPAN[2] = v0;
+            UV_SPAN[3] = v1;
+            QuadShape shape = projected ? QUAD_SHAPE : null;
             net.minecraft.client.renderer.texture.TextureAtlasSprite atlasSprite =
                     spriteFor(u0, u1, v0, v1);
-            int cells =
-                    rasterize(
-                            clipped,
-                            shape,
-                            atlasSprite == null ? null : atlasSprite.contents(),
-                            shape == null ? null : uvSpan);
+            int cells = rasterize(clipped, shape, atlasSprite, shape == null ? null : UV_SPAN);
             if (cells > largest) {
                 largest = cells;
                 largestItem =
@@ -1360,10 +1517,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
             net.minecraft.client.renderer.texture.TextureAtlasSprite found = null;
             for (net.minecraft.client.renderer.texture.TextureAtlasSprite sprite : atlasSprites()) {
-                if (u0 >= sprite.getU0() - 1.0E-4
-                        && u1 <= sprite.getU1() + 1.0E-4
-                        && v0 >= sprite.getV0() - 1.0E-4
-                        && v1 <= sprite.getV1() + 1.0E-4) {
+                if (u0 >= sprite.getU0() - SPRITE_UV_TOLERANCE
+                        && u1 <= sprite.getU1() + SPRITE_UV_TOLERANCE
+                        && v0 >= sprite.getV0() - SPRITE_UV_TOLERANCE
+                        && v1 <= sprite.getV1() + SPRITE_UV_TOLERANCE) {
                     found = sprite;
                     break;
                 }
@@ -1660,6 +1817,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static void closeStage(ClientGameTestContext context, String id, int holdTicks) {
         ClientGameTestStages.endStage(context, id, holdTicks);
+        // Frames after the last caption push still belong to this stage; read the sticky violation
+        // here so a cooldown frame is not named after the next stage, and so the tail is judged.
+        requireNoEntityFillsTheFrame(id);
     }
 
     /// Teleports the player into a scenario's scene, already facing the point it looks at, and
@@ -1696,13 +1856,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Spawns the invisible armor stand the bow, crossbow, firework and trident stages are filmed
     /// through. It stands 1.8 blocks beside the shooter and a block behind {@link #RANGE_STAND},
-    /// looking at a point halfway between the shooter and the target: close enough that the shooter
-    /// fills the left of the frame, and sideways of the line of fire, so a crit arrow's trail,
-    /// which drifts back along that line ({@code AbstractArrow.java:226-238} and {@code
-    /// CritParticle.java:20-28} in the 26.3 sources), passes blocks from the lens. First person
-    /// cannot keep that trail off the lens: the arrow spawns at the eye and each tick's four crits
-    /// spawn on its path and drift back along it for about four blocks. The stand is invisible, so
-    /// it draws nothing itself, and it is not a projectile's target: it never takes a hit.
+    /// looking at a point halfway between the shooter and the target: blocks away from the line of
+    /// fire, so a crit arrow's trail, which drifts back along that line ({@code
+    /// AbstractArrow.java:226-238} and {@code CritParticle.java:20-28} in the 26.3 sources), passes
+    /// blocks from the lens. First person cannot keep that trail off the lens: the arrow spawns at
+    /// the eye and each tick's four crits spawn on its path and drift back along it for about four
+    /// blocks. The stand is invisible, so it draws nothing itself, and it is not a projectile's
+    /// target: it never takes a hit.
     private static UUID spawnRangeCameraStand(MinecraftServer server, Vec3 target) {
         ServerLevel level = server.overworld();
         ArmorStand stand = EntityTypes.ARMOR_STAND.create(level, EntitySpawnReason.COMMAND);
@@ -1817,7 +1977,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// scale, which the synced attack speed shortens tenfold. The cooldown rule is off in both
     /// halves, because with it on the server's own {@code getAttackStrengthScale} returns 1.0
     /// ({@code PlayerMixin.acceleratedDamage$fullyChargeAttacks}) and the client, which never sees
-    /// that override, is left with its own scale.
+    /// that override, is left with its own scale. The `melee-on` stage is different:
+    /// `disable_attack_cooldown` is on there, so the indicator in that half is vanilla's own
+    /// near-full bar while every sword hit lands. A-1409 is shown by these two cooldown halves,
+    /// where the effect rule alone changes the synced attack speed.
     ///
     /// <p>The game runs at {@link #COOLDOWN_TICK_RATE} ticks a second for both halves. The
     /// accelerated refill is 3.3 ticks, a sixth of a second at the vanilla 20, which a 30 fps
@@ -2260,7 +2423,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             if (landed) {
                 break;
             }
-            if (waited >= 60) {
+            if (waited >= INPUT_WAIT_TICKS) {
                 throw new AssertionError(
                         "Expected every attack or shot of "
                                 + stage
