@@ -1752,7 +1752,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
     }
 
-
     private static void setDamageRules(
             MinecraftServer server, boolean disableIFrames, boolean disableAttackCooldown) {
         GameRules rules = server.overworld().getGameRules();
