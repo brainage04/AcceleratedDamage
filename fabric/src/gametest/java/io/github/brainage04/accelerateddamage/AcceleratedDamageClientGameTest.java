@@ -204,6 +204,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Vector4f PROJECTED = new Vector4f();
     private static final double[] UV_RESULT = new double[2];
 
+    /// Render-thread scratch for the model and box faces the check rasterises. The lists are
+    /// cleared per item; the immutable Vec3 snapshots still have to be rebuilt because Vec3 has no
+    /// setter.
+    private static final PoseStack POSE = new PoseStack();
+
+    private static final Vector3f TRANSFORMED = new Vector3f();
+    private static final List<Vec3[]> MODEL_FACES = new ArrayList<>();
+    private static final List<Vec3[]> BOX_FACES = new ArrayList<>();
+
     private static final double[] UV_SPAN = new double[4];
     private static final QuadShape QUAD_SHAPE = new QuadShape();
 
@@ -858,7 +867,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The faces of an arrow's or a trident's model as its renderer draws them, relative to the
     /// camera, or null for any other entity.
     private static List<Vec3[]> modelFaces(Minecraft client, EntityRenderState state, Vec3 eye) {
-        PoseStack pose = new PoseStack();
+        PoseStack pose = POSE;
+        pose.setIdentity();
         pose.translate(state.x - eye.x, state.y - eye.y, state.z - eye.z);
         ModelLayerLocation layer;
         if (state instanceof ArrowRenderState arrow) {
@@ -878,7 +888,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             MODELS.clear();
             modelsOwner = client.getEntityModels();
         }
-        List<Vec3[]> faces = new ArrayList<>();
+        List<Vec3[]> faces = MODEL_FACES;
+        faces.clear();
         MODELS.computeIfAbsent(layer, client.getEntityModels()::bakeLayer)
                 .visit(
                         pose,
@@ -893,7 +904,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                                             vertex.worldX(),
                                                             vertex.worldY(),
                                                             vertex.worldZ(),
-                                                            new Vector3f());
+                                                            TRANSFORMED);
                                     face[index] = new Vec3(point.x, point.y, point.z);
                                 }
                                 faces.add(face);
@@ -1608,7 +1619,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return model;
         }
         Vec3 offset = new Vec3(state.x, state.y, state.z).subtract(eye);
-        List<Vec3[]> faces = new ArrayList<>();
+        List<Vec3[]> faces = BOX_FACES;
+        faces.clear();
         // The entity's box, from the size EntityRenderer copies into the state
         // (EntityRenderer.java:168-169), standing on its position and centred on x and z.
         double halfWidth = state.boundingBoxWidth / 2.0;
