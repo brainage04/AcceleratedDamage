@@ -652,6 +652,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 server -> server.runOnServer(AcceleratedDamageClientGameTest::buildArena),
                 server -> {
                     int playerId;
+                    Throwable original = null;
                     try {
                         playerId =
                                 server.computeOnServer(
@@ -745,23 +746,42 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
                         ClientGameTestCommands.clearChat(context);
                         context.waitTicks(4);
+                    } catch (Throwable failure) {
+                        original = failure;
+                        throw failure;
                     } finally {
-                        if (rangeCameraStand != null) {
-                            UUID stand = rangeCameraStand;
-                            rangeCameraStand = null;
-                            context.runOnClient(client -> client.setCameraEntity(client.player));
-                            server.runOnServer(
-                                    current -> {
-                                        Entity entity = current.overworld().getEntity(stand);
-                                        if (entity != null) {
-                                            entity.discard();
-                                        }
-                                    });
+                        AssertionError finalViolation = null;
+                        try {
+                            if (rangeCameraStand != null) {
+                                UUID stand = rangeCameraStand;
+                                rangeCameraStand = null;
+                                context.runOnClient(
+                                        client -> client.setCameraEntity(client.player));
+                                server.runOnServer(
+                                        current -> {
+                                            Entity entity = current.overworld().getEntity(stand);
+                                            if (entity != null) {
+                                                entity.discard();
+                                            }
+                                        });
+                            }
+                            try {
+                                requireNoEntityFillsTheFrame("showcase.final");
+                            } catch (AssertionError violation) {
+                                finalViolation = violation;
+                            }
+                        } finally {
+                            TRACKED.clear();
+                            publishTrackedIds();
+                            server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
                         }
-                        TRACKED.clear();
-                        publishTrackedIds();
-                        requireNoEntityFillsTheFrame("showcase.final");
-                        server.runOnServer(AcceleratedDamageClientGameTest::restoreState);
+                        if (finalViolation != null) {
+                            if (original != null) {
+                                original.addSuppressed(finalViolation);
+                            } else {
+                                throw finalViolation;
+                            }
+                        }
                     }
                 });
     }
@@ -1989,10 +2009,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// scale, which the synced attack speed shortens tenfold. The cooldown rule is off in both
     /// halves, because with it on the server's own {@code getAttackStrengthScale} returns 1.0
     /// ({@code PlayerMixin.acceleratedDamage$fullyChargeAttacks}) and the client, which never sees
-    /// that override, is left with its own scale. The `melee-on` stage is different:
-    /// `disable_attack_cooldown` is on there, so the indicator in that half is vanilla's own
-    /// near-full bar while every sword hit lands. A-1409 is shown by these two cooldown halves,
-    /// where the effect rule alone changes the synced attack speed.
+    /// that override, is left with its own scale. The `melee-on` stage has
+    /// `disable_attack_cooldown` on and the effect rule off: the client restarts its own attack
+    /// timer on every hit (`MultiPlayerGameMode.java:437` in the 26.3 sources), so the bar stays
+    /// low while every sword hit lands. A-1409 is shown by these two cooldown halves, where the
+    /// effect rule alone changes the synced attack speed.
     ///
     /// <p>The game runs at {@link #COOLDOWN_TICK_RATE} ticks a second for both halves. The
     /// accelerated refill is 3.3 ticks, a sixth of a second at the vanilla 20, which a 30 fps
