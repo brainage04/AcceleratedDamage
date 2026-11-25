@@ -187,6 +187,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static boolean atlasSpritesBroken;
 
+    /// The reflected image of each sprite the raster samples, keyed by the sprite contents.
+    private static final Map<net.minecraft.client.renderer.texture.SpriteContents, com.mojang.blaze3d.platform.NativeImage> SPRITE_IMAGES = new HashMap<>();
+
+    private static boolean spriteImagesBroken;
+
     /// The health the current half's last caption showed, for {@link #requireLastCaptionShown}.
     private static volatile Float LAST_CAPTION_HEALTH;
 
@@ -1064,6 +1069,46 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         RPB[vertex] = paramB;
     }
 
+    /// Whether the sprite's pixel at (x, y) is opaque. A particle is measured for what it hides:
+    /// a translucent pixel tints what is behind it and the scene shows through, so only a fully
+    /// opaque pixel hides the frame. {@code SpriteContents.isTransparent} answers only for a fully
+    /// transparent pixel and keeps the image private, so the alpha is read through the same
+    /// reflection as the atlas's sprite list, at frame zero ({@code SpriteContents.java:212-221}
+    /// in the 26.3 sources; the film's animated sprites do not change their coverage between
+    /// frames). A pixel whose image cannot be read counts as opaque.
+    private static boolean spriteOpaque(
+            net.minecraft.client.renderer.texture.SpriteContents sprite, int x, int y) {
+        com.mojang.blaze3d.platform.NativeImage image = spriteImage(sprite);
+        if (image == null) {
+            return true;
+        }
+        int colour = image.getPixel(x, y);
+        return net.minecraft.util.ARGB.alpha(colour) == 255;
+    }
+
+    /// The sprite's image, reflected once per sprite. Vanilla reads it the same way in {@code
+    /// SpriteContents.isTransparent}.
+    private static com.mojang.blaze3d.platform.NativeImage spriteImage(
+            net.minecraft.client.renderer.texture.SpriteContents sprite) {
+        if (SPRITE_IMAGES.containsKey(sprite)) {
+            return SPRITE_IMAGES.get(sprite);
+        }
+        com.mojang.blaze3d.platform.NativeImage image = null;
+        if (!spriteImagesBroken) {
+            try {
+                java.lang.reflect.Field field =
+                        net.minecraft.client.renderer.texture.SpriteContents.class.getDeclaredField(
+                                "originalImage");
+                field.setAccessible(true);
+                image = (com.mojang.blaze3d.platform.NativeImage) field.get(sprite);
+            } catch (ReflectiveOperationException | ClassCastException failure) {
+                spriteImagesBroken = true;
+            }
+        }
+        SPRITE_IMAGES.put(sprite, image);
+        return image;
+    }
+
     /// Marks the grid cells a clipped, projected convex polygon covers. A convex polygon meets a
     /// scanline in one span, so each row is filled between the edge crossings of its centre. Cells
     /// outside the screen fall away by clamping. For a particle, {@code sprite} is its sprite (or
@@ -1122,7 +1167,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             Math.min(
                                     sprite.height() - 1,
                                     Math.max(0, (int) Math.round(v * sprite.height() - 0.5)));
-                    if (sprite.isTransparent(0, px, py)) {
+                    if (!spriteOpaque(sprite, px, py)) {
                         continue;
                     }
                 }
