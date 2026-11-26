@@ -369,6 +369,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// still be in flight after a present (MinecraftModConventions 3.5.0, GameCapture.java:37,44-48).
     private static final int CAPTURE_SETTLE_TICKS = 4;
 
+    /// Client ticks a scene's targets may take to reach the client's world. Packets are processed at
+    /// the start of a client tick ({@code Minecraft.java:1156-1161} in the 26.3 sources) and a filmed
+    /// frame parks the render thread after its present, so a target can arrive after the server's
+    /// reading. The wait ends as soon as the scene is in place.
+    private static final int SHOT_WAIT_TICKS = 200;
+
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
     /// placed in a scene is a new entity on the client, its body built facing the rotation sent
     /// with it (LivingEntity.recreateFromPacket, LivingEntity.java:4009 in the 26.3 sources; see
@@ -3230,7 +3236,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static void waitForShot(
             ClientGameTestContext context, String stage, List<ShotTarget> shot) {
         try {
-            context.waitFor(client -> shotViolation(client, shot) == null, 200);
+            context.waitFor(client -> shotViolation(client, shot) == null, SHOT_WAIT_TICKS);
         } catch (AssertionError timeout) {
             throw new AssertionError(
                     stage
@@ -3244,9 +3250,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// every player-shaped target facing the camera.
     private static void requireShot(
             ClientGameTestContext context, String stage, String when, List<ShotTarget> shot) {
-        String violation = context.computeOnClient(client -> shotViolation(client, shot));
-        if (violation != null) {
-            throw new AssertionError(stage + " " + when + ": " + violation);
+        try {
+            context.waitFor(client -> shotViolation(client, shot) == null, SHOT_WAIT_TICKS);
+        } catch (AssertionError timeout) {
+            throw new AssertionError(
+                    stage
+                            + " "
+                            + when
+                            + ": "
+                            + context.computeOnClient(client -> shotViolation(client, shot)),
+                    timeout);
         }
     }
 
