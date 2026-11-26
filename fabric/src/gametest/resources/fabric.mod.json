@@ -12,5 +12,6 @@
 		"fabric-client-gametest": [
 			"io.github.brainage04.accelerateddamage.AcceleratedDamageClientGameTest"
 		]
-	}
+	},
+	"mixins": ["accelerateddamage-recording.mixins.json"]
 }

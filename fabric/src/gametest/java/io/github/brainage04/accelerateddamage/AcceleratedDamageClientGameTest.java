@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import io.github.brainage04.accelerateddamage.gamerule.ModGameRules;
+import io.github.brainage04.accelerateddamage.recording.ShowcaseFramePacer;
 import io.github.brainage04.accelerateddamage.util.VirtualTime;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestCommands;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestPlayerActions;
@@ -249,6 +250,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// #requireLastCaptionShown}.
     private static volatile int LAST_CAPTION_TICK;
 
+    /// The recorder's drop count when the current stage began, -1 outside a stage.
+    private static int stageStartDrops = -1;
+
     private static final int ARENA_Y = 64;
     private static final double RANGE_X = -6.5D;
     private static final Vec3 MELEE_STAND = new Vec3(0.5, ARENA_Y, 1.5);
@@ -360,6 +364,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the bow
     /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
+
+    /// Client ticks allowed for the recorder to finish a copy and count a late drop: four buffers can
+    /// still be in flight after a present (MinecraftModConventions 3.5.0, GameCapture.java:37,44-48).
+    private static final int CAPTURE_SETTLE_TICKS = 4;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
     /// placed in a scene is a new entity on the client, its body built facing the rotation sent
@@ -654,6 +662,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     int playerId;
                     Throwable original = null;
                     try {
+                        ShowcaseFramePacer.enableIfCaptured();
                         playerId =
                                 server.computeOnServer(
                                         current -> {
@@ -750,6 +759,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         original = failure;
                         throw failure;
                     } finally {
+                        ShowcaseFramePacer.disable();
                         AssertionError finalViolation = null;
                         try {
                             if (rangeCameraStand != null) {
@@ -1843,6 +1853,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ClientGameTestContext context, String id, String title, String subtitle) {
         ClientGameTestCommands.clearChat(context);
         ClientGameTestStages.markStage(id);
+        stageStartDrops = ShowcaseFramePacer.droppedFrames();
+        System.out.println("CAPTURE_DROPS " + id + " start " + stageStartDrops);
         ClientGameTestRecorder.showStep(context, id, title, subtitle);
         requireNoEntityFillsTheFrame(id);
     }
@@ -1852,6 +1864,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         // Frames after the last caption push still belong to this stage; read the sticky violation
         // here so a cooldown frame is not named after the next stage, and so the tail is judged.
         requireNoEntityFillsTheFrame(id);
+        context.waitTicks(CAPTURE_SETTLE_TICKS);
+        int endDrops = ShowcaseFramePacer.droppedFrames();
+        System.out.println("CAPTURE_DROPS " + id + " end " + endDrops);
+        if (stageStartDrops >= 0 && endDrops > stageStartDrops) {
+            throw new AssertionError(
+                    "Recorder dropped " + (endDrops - stageStartDrops) + " frames in " + id);
+        }
+        stageStartDrops = -1;
     }
 
     /// Teleports the player into a scenario's scene, already facing the point it looks at, and

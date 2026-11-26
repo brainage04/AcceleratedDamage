@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "io.github.brainage04.accelerateddamage.recording.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["FramerateLimiterMixin"],
+  "injectors": {"defaultRequire": 1}
+}
