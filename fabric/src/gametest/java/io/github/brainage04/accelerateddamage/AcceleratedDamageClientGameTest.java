@@ -338,6 +338,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// speed effect the client-duration check reads uses the same length.
     private static final int REGENERATION_TICKS = 1200;
 
+    /// Virtual ticks of poison-cloud life. A paced client lets the server run extra ticks between
+    /// client checks, so the cloud is renewed at the middle reading to reach the last one.
+    private static final int POISON_CLOUD_DURATION_TICKS = 600;
+
+    /// Reading at which the cloud gets its duration again, before the last check at three readings.
+    private static final int CLOUD_RENEW_READING = 2 * READING_TICKS;
+
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
     private static final int INPUT_CADENCE_TICKS = 2;
 
@@ -365,14 +372,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
 
-    /// Client ticks allowed for the recorder to finish a copy and count a late drop: four buffers can
-    /// still be in flight after a present (MinecraftModConventions 3.5.0, GameCapture.java:37,44-48).
+    /// Client ticks allowed for the recorder to finish a copy and count a late drop: four buffers
+    /// can still be in flight after a present (MinecraftModConventions 3.5.0,
+    /// GameCapture.java:37,44-48).
     private static final int CAPTURE_SETTLE_TICKS = 4;
 
-    /// Client ticks a scene's targets may take to reach the client's world. Packets are processed at
-    /// the start of a client tick ({@code Minecraft.java:1156-1161} in the 26.3 sources) and a filmed
-    /// frame parks the render thread after its present, so a target can arrive after the server's
-    /// reading. The wait ends as soon as the scene is in place.
+    /// Client ticks a scene's targets may take to reach the client's world. Packets are processed
+    /// at the start of a client tick ({@code Minecraft.java:1156-1161} in the 26.3 sources) and a
+    /// filmed frame parks the render thread after its present, so a target can arrive after the
+    /// server's reading. The wait ends as soon as the scene is in place.
     private static final int SHOT_WAIT_TICKS = 200;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
@@ -2735,7 +2743,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     List.of(),
                                     Optional.empty()));
                     cloud.setRadius(2.5F);
-                    cloud.setDuration(600);
+                    cloud.setDuration(POISON_CLOUD_DURATION_TICKS);
                     cloud.setWaitTime(0);
                     level.addFreshEntity(cloud);
                     return List.of(starving, regeneration, saturated, clouded, cloud.getId());
@@ -2757,7 +2765,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     if (!(cloud instanceof AreaEffectCloud poisonCloud)) {
                         throw new AssertionError("Expected the poison cloud to exist");
                     }
-                    poisonCloud.setDuration(poisonCloud.tickCount + 600);
+                    poisonCloud.setDuration(poisonCloud.tickCount + POISON_CLOUD_DURATION_TICKS);
                 });
     }
 
@@ -2875,6 +2883,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     + " ticks: "
                                     + String.join(" | ", label)
                                     + airLabel);
+                    if (tick == CLOUD_RENEW_READING) {
+                        int cloudId = placed.get(placed.size() - 1);
+                        server.runOnServer(
+                                current -> {
+                                    Entity cloud = current.overworld().getEntity(cloudId);
+                                    if (cloud instanceof AreaEffectCloud poisonCloud) {
+                                        poisonCloud.setDuration(
+                                                poisonCloud.tickCount
+                                                        + POISON_CLOUD_DURATION_TICKS);
+                                    }
+                                });
+                    }
                     requireShot(context, stage, "after " + tick + " ticks", shot);
                     if (rulesOn && tick == READING_TICKS) {
                         requireClientEffectDurationSynchronized(context, server, playerId, stage);
