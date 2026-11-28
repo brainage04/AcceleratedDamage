@@ -989,9 +989,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Whether a render state is the projectile the player has just fired. In a stage filmed from
     /// the player's eyes ({@link #firstPersonProjectiles}) the arrow, trident or rocket leaves from
-    /// the camera and its model fills the lens until it has flown clear. Nothing else in these
-    /// stages shoots, so a projectile within {@link #OUTGOING_PROJECTILE_RANGE} of the camera is
-    /// the player's own. Every other entity and every particle still counts toward the frame.
+    /// the camera and its model fills the lens until it has flown clear, and a crit arrow's trail
+    /// particles spawn along its path from the same point. Nothing else in these stages shoots, so
+    /// a projectile, or a particle quad, within {@link #OUTGOING_PROJECTILE_RANGE} of the camera
+    /// is the player's own. Every other entity and every farther particle still counts.
     private static boolean isOutgoingProjectile(EntityRenderState state, Vec3 eye) {
         boolean projectile =
                 state instanceof ArrowRenderState
@@ -1560,12 +1561,23 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             return this;
         }
 
+        /// Whether a quad's centre lies within {@link #OUTGOING_PROJECTILE_RANGE} of the camera.
+        /// The corners are camera-relative. In a stage filmed from the player's eyes the only
+        /// particles that close are the trail of the projectile the player has just fired.
+        private boolean isNearCamera(Vec3[] corners) {
+            Vec3 centre = corners[0].add(corners[1]).add(corners[2]).add(corners[3]).scale(0.25);
+            return centre.lengthSqr() <= OUTGOING_PROJECTILE_RANGE * OUTGOING_PROJECTILE_RANGE;
+        }
+
         private void rasterizeQuad() {
             Vec3[] corners = new Vec3[4];
             double[] paramA = new double[4];
             double[] paramB = new double[4];
             for (int index = 0; index < 4; index++) {
                 corners[index] = new Vec3(QX[index], QY[index], QZ[index]);
+            }
+            if (firstPersonProjectiles && isNearCamera(corners)) {
+                return;
             }
             paramA[0] = 1.0;
             paramA[1] = 1.0;
