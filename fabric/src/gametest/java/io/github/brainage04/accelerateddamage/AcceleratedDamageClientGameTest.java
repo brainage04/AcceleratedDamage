@@ -991,8 +991,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// the player's eyes ({@link #firstPersonProjectiles}) the arrow, trident or rocket leaves from
     /// the camera and its model fills the lens until it has flown clear, and a crit arrow's trail
     /// particles spawn along its path from the same point. Nothing else in these stages shoots, so
-    /// a projectile, or a particle quad, within {@link #OUTGOING_PROJECTILE_RANGE} of the camera
-    /// is the player's own. Every other entity and every farther particle still counts.
+    /// a projectile, or a particle quad, within {@link #OUTGOING_PROJECTILE_RANGE} of the camera is
+    /// the player's own. Every other entity and every farther particle still counts.
     private static boolean isOutgoingProjectile(EntityRenderState state, Vec3 eye) {
         boolean projectile =
                 state instanceof ArrowRenderState
