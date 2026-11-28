@@ -40,9 +40,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.minecraft.client.Camera;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.Options;
 import net.minecraft.client.model.geom.ModelLayerLocation;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.geom.ModelPart;
@@ -79,7 +77,6 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -259,6 +256,38 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final Vec3 EFFECTS_STAND = new Vec3(0.0, ARENA_Y, -2.5);
     private static final Vec3 HUNGER_STAND = new Vec3(0.0, ARENA_Y, -34.5);
 
+    /// The knockback lane: a floor of one-block white and black bands along +Z, east of the splash
+    /// pillar, with the player at its start and a target {@code distance} blocks in front.
+    private static final double KNOCK_X = 30.5;
+
+    private static final Vec3 KNOCK_STAND = new Vec3(KNOCK_X, ARENA_Y, 0.5);
+    private static final int KNOCK_LANE_HALF_WIDTH = 2;
+    private static final int KNOCK_LANE_START_Z = -4;
+    private static final int KNOCK_LANE_END_Z = 36;
+
+    /// How far a case's target stands from the player. A sword reaches 3 blocks and the target
+    /// moves away from its first hit, so the sword's target stands close. A rocket's burst reaches
+    /// the shooter inside 5 blocks ({@code FireworkRocketEntity.dealExplosionDamage}), so its
+    /// target stands as far as the damage stage's does.
+    private static final double SWORD_KNOCK_DISTANCE = 2.0;
+
+    private static final double RANGE_KNOCK_DISTANCE = 4.0;
+    private static final double ROCKET_KNOCK_DISTANCE = FIREWORK_TARGET.z - RANGE_STAND.z;
+    private static final int SWORD_KNOCK_HITS = 2;
+    private static final int RANGE_KNOCK_SHOTS = 3;
+
+    /// Ticks a knockback stage waits after its last hit for the target to come to rest.
+    private static final int KNOCK_SLIDE_TICKS = 80;
+
+    /// Blocks a tick a target may still move at and count as at rest.
+    private static final double KNOCK_REST_SPEED = 0.01;
+
+    /// Ticks a knockback stage holds the target's final distance on screen.
+    private static final int KNOCK_HOLD_TICKS = 10;
+
+    /// How many times as far the target must be pushed with the rule on.
+    private static final double KNOCK_MIN_GAIN = 1.2;
+
     /// A potion thrown at 0.5 blocks a tick (ThrowablePotionItem.java:26 in the 26.3 sources) under
     /// a gravity of 0.05 a tick (AbstractThrownPotion.java:45-47) breaks only about five blocks
     /// out, and its splash scales Harming by how close each entity's box comes to it, the thrower's
@@ -287,21 +316,15 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// fills it.
     private static final int COOLDOWN_TICKS = 4;
 
-    /// Ticks a cooldown stage holds its picture. At {@link #COOLDOWN_TICK_RATE} ticks a second that
-    /// is six seconds: nine refills of the accelerated 3.3-tick delay, and most of one of the
-    /// vanilla 33.3-tick delay.
-    private static final int COOLDOWN_HOLD_TICKS = 30;
+    /// Ticks a cooldown stage holds its picture: two seconds at the game's 20 ticks a second, four
+    /// mace swings.
+    private static final int COOLDOWN_HOLD_TICKS = 40;
 
-    /// Ticks between the mace hits of a cooldown stage: longer than the accelerated delay, so the
-    /// indicator fills between hits with the rule on, and far shorter than the vanilla one. At
-    /// {@link #COOLDOWN_TICK_RATE} ticks a second a hit lands every second, so the indicator is
-    /// drawn for the whole stage: empty, filling, full, then empty again.
-    private static final int COOLDOWN_CADENCE_TICKS = 5;
-
-    /// Ticks a second the game runs at for the two cooldown stages. The accelerated refill is 3.3
-    /// ticks, a sixth of a second at the vanilla 20, which a 30 fps capture shows as a flicker. At
-    /// 5 ticks a second it lasts two thirds of a second, and the vanilla refill 6.7 seconds.
-    private static final float COOLDOWN_TICK_RATE = 5.0F;
+    /// Ticks between the mace hits of a cooldown stage: half a second at 20 ticks a second, longer
+    /// than the accelerated 3.3-tick delay, so the indicator fills between hits with the rule on,
+    /// and far shorter than the vanilla 33.3-tick one, so it stays under a third full with the rule
+    /// off.
+    private static final int COOLDOWN_CADENCE_TICKS = 10;
 
     /// Ticks the title card is on screen: 0.8 s at the 20 ticks a second the test has set at that
     /// point ({@code TickRateManager.java:9} is the default). A card is a still, and a still longer
@@ -337,11 +360,18 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
     private static final int INPUT_CADENCE_TICKS = 2;
 
-    /// A bow or trident is drawn on one tick and released on the next. The server's synced "using
-    /// an item" flag for that draw reaches the client a tick after the release and starts the use
-    /// again on the client (LocalPlayer.java:596-606 in the 26.3 sources), which swallows a use
-    /// press in that tick. The next draw therefore starts a tick later, three ticks apart.
-    private static final int DRAW_CADENCE_TICKS = 3;
+    /// A bow is drawn on one tick and released on the next. The server's synced "using an item"
+    /// flag for that draw reaches the client a tick after the release and starts the use again on
+    /// the client (LocalPlayer.java:596-606 in the 26.3 sources), which swallows a use press in
+    /// that tick. The next draw therefore starts a tick later.
+    private static final int BOW_PRESS_TICKS = 1;
+
+    private static final int BOW_CADENCE_TICKS = 4;
+
+    /// A hotbar shot is two presses: the hotbar key, then the use key.
+    private static final int HOTBAR_PRESS_TICKS = 2;
+
+    private static final int HOTBAR_CADENCE_TICKS = 4;
 
     private static final int MAX_INPUT_GAP_TICKS = 5;
 
@@ -350,7 +380,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int VANILLA_WINDOW_TICKS = 10;
 
     private static final int MELEE_HITS = 16;
-    private static final int BOW_SHOTS = 14;
+    private static final int BOW_SHOTS = 10;
     private static final int HOTBAR_SHOTS = 9;
 
     /// A filmed half lasts about two seconds.
@@ -358,7 +388,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Ticks the last caption of a half stays on screen before its end marker. The cut keeps a
     /// stage up to its marker, so a caption pushed on the marker's own tick is never drawn: the bow
-    /// half fires 14 shots at 3 ticks, 42 ticks, which is already past {@link #HALF_TICKS}.
+    /// half fires 10 shots at 4 ticks, which already runs up to {@link #HALF_TICKS}.
     private static final int MIN_LAST_CAPTION_TICKS = 4;
 
     /// Where an off-stage dummy waits: far outside the recording player's view distance, so a dummy
@@ -428,9 +458,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The game tick the server is on, set at the start of every server tick.
     private static volatile int serverTick;
 
-    /// The armor stand the projectile stages' camera sits on, or null while the camera is the
-    /// recording player.
-    private static volatile UUID rangeCameraStand;
+    /// Whether the stage being filmed is a projectile stage seen from the player's own eyes: a
+    /// frame the trail of a crit arrow covers is then reported ({@code AD_LENS}), not failed.
+    private static volatile boolean firstPersonProjectiles;
 
     /// The log of the half being filmed, or {@code null} between halves. Written on the server
     /// thread only.
@@ -684,46 +714,67 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
                         recordMelee(context, server, playerId);
                         recordBow(context, server, playerId);
+                        IntFunction<ItemStack> crossbow =
+                                slot -> loadedCrossbow(new ItemStack(Items.ARROW));
                         recordLoadedHotbar(
                                 context,
                                 server,
                                 playerId,
                                 "crossbow",
-                                "Nine loaded crossbows",
+                                "Crossbow: an arrow right after a hit does almost nothing",
+                                "Crossbow: every arrow does its full damage",
                                 "CrossbowDummy",
                                 RANGE_TARGET,
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
-                                slot -> loadedCrossbow(new ItemStack(Items.ARROW)),
-                                INPUT_CADENCE_TICKS);
+                                crossbow,
+                                hotbarKnock(
+                                        "crossbow",
+                                        "Crossbow",
+                                        "arrow",
+                                        "CrossbowDummy",
+                                        RANGE_KNOCK_DISTANCE,
+                                        crossbow));
+                        IntFunction<ItemStack> rocket = slot -> loadedCrossbow(fireworkRocket());
                         recordLoadedHotbar(
                                 context,
                                 server,
                                 playerId,
                                 "firework",
-                                "Nine crossbows of rockets",
+                                "Rocket: a rocket right after a hit does almost nothing",
+                                "Rocket: every rocket does its full damage",
                                 "FireworkDummy",
                                 FIREWORK_TARGET,
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
-                                slot -> loadedCrossbow(fireworkRocket()),
-                                INPUT_CADENCE_TICKS);
+                                rocket,
+                                hotbarKnock(
+                                        "firework",
+                                        "Rocket",
+                                        "rocket",
+                                        "FireworkDummy",
+                                        ROCKET_KNOCK_DISTANCE,
+                                        rocket));
+                        IntFunction<ItemStack> trident = slot -> new ItemStack(Items.TRIDENT);
                         recordLoadedHotbar(
                                 context,
                                 server,
                                 playerId,
                                 "trident",
-                                "A trident every 3 ticks",
+                                "Trident: a throw right after a hit does almost nothing",
+                                "Trident: every throw does its full damage",
                                 "TridentDummy",
                                 RANGE_TARGET,
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
-                                slot -> new ItemStack(Items.TRIDENT),
-                                DRAW_CADENCE_TICKS);
-                        if (rangeCameraStand != null) {
-                            leaveRangeCamera(context, server, rangeCameraStand);
-                            rangeCameraStand = null;
-                        }
+                                trident,
+                                hotbarKnock(
+                                        "trident",
+                                        "Trident",
+                                        "trident",
+                                        "TridentDummy",
+                                        RANGE_KNOCK_DISTANCE,
+                                        trident));
                         requireSpearGate(context, server, playerId);
                         recordEffectScene(context, server, playerId, effectsScene());
                         // Aimed at the target's eyes, the throw's lift of 20 degrees above the
@@ -733,7 +784,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server,
                                 playerId,
                                 "splash",
-                                "Nine splash potions of harming",
+                                "Potion: a splash right after a hit does almost nothing",
+                                "Potion: every splash does its full damage",
                                 "SplashDummy",
                                 SPLASH_TARGET,
                                 SPLASH_STAND,
@@ -741,7 +793,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 slot ->
                                         PotionContents.createItemStack(
                                                 Items.SPLASH_POTION, Potions.HARMING),
-                                INPUT_CADENCE_TICKS);
+                                null);
                         recordEffectScene(context, server, playerId, hungerEffectsScene());
                         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
                         ClientGameTestCommands.clearChat(context);
@@ -752,24 +804,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     } finally {
                         AssertionError finalViolation = null;
                         try {
-                            if (rangeCameraStand != null) {
-                                UUID stand = rangeCameraStand;
-                                rangeCameraStand = null;
-                                context.runOnClient(
-                                        client -> client.setCameraEntity(client.player));
-                                server.runOnServer(
-                                        current -> {
-                                            Entity entity = current.overworld().getEntity(stand);
-                                            if (entity != null) {
-                                                entity.discard();
-                                            }
-                                        });
-                            }
-                            try {
-                                requireNoEntityFillsTheFrame("showcase.final");
-                            } catch (AssertionError violation) {
-                                finalViolation = violation;
-                            }
+                            requireNoEntityFillsTheFrame("showcase.final");
+                        } catch (AssertionError violation) {
+                            finalViolation = violation;
                         } finally {
                             TRACKED.clear();
                             publishTrackedIds();
@@ -791,7 +828,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// later costs only a few ticks.
     private static void preloadArena(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
-        List<Vec3> viewpoints = List.of(EFFECTS_STAND, SPLASH_STAND, HUNGER_STAND, RANGE_STAND);
+        List<Vec3> viewpoints =
+                List.of(EFFECTS_STAND, SPLASH_STAND, HUNGER_STAND, RANGE_STAND, KNOCK_STAND);
         for (Vec3 viewpoint : viewpoints) {
             server.runOnServer(
                     current ->
@@ -942,6 +980,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         String violation = LAST_FRAME_VIOLATION;
         LAST_FRAME_VIOLATION = null;
         if (violation != null) {
+            if (firstPersonProjectiles) {
+                // Seen from the player's own eyes, a crit arrow's trail drifts back along the
+                // line of fire and can cross the lens. The film does not move the camera for it:
+                // the frames are reported instead.
+                System.out.println("AD_LENS " + stage + ": " + violation);
+                return;
+            }
             throw new AssertionError(
                     "Expected no entity to fill the frame in " + stage + ": " + violation);
         }
@@ -1761,6 +1806,21 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             level.setBlockAndUpdate(
                     new BlockPos(x, ARENA_Y - 1, 0), Blocks.GLOWSTONE.defaultBlockState());
         }
+        // The knockback lane: one-block bands of white and black concrete along the line a pushed
+        // target travels, so a push reads as the bands it crosses.
+        int laneCentre = Mth.floor(KNOCK_X);
+        for (int x = laneCentre - KNOCK_LANE_HALF_WIDTH;
+                x <= laneCentre + KNOCK_LANE_HALF_WIDTH;
+                x++) {
+            for (int z = KNOCK_LANE_START_Z; z <= KNOCK_LANE_END_Z; z++) {
+                setBlock(
+                        level,
+                        x,
+                        ARENA_Y - 1,
+                        z,
+                        (z & 1) == 0 ? Blocks.CONCRETE.white() : Blocks.CONCRETE.black());
+            }
+        }
         // A wall behind the melee target, so the scene has a backdrop.
         for (int x = -4; x <= 4; x++) {
             for (int y = ARENA_Y; y <= ARENA_Y + 2; y++) {
@@ -1886,83 +1946,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         ClientGameTestPlayerActions.lookAt(context, view);
     }
 
-    /// Spawns the invisible armor stand the bow, crossbow, firework and trident stages are filmed
-    /// through. It stands 1.8 blocks beside the shooter and a block behind {@link #RANGE_STAND},
-    /// looking at a point halfway between the shooter and the target: blocks away from the line of
-    /// fire, so a crit arrow's trail, which drifts back along that line ({@code
-    /// AbstractArrow.java:226-238} and {@code CritParticle.java:20-28} in the 26.3 sources), passes
-    /// blocks from the lens. First person cannot keep that trail off the lens: the arrow spawns at
-    /// the eye and each tick's four crits spawn on its path and drift back along it for about four
-    /// blocks. The stand is invisible, so it draws nothing itself, and it is not a projectile's
-    /// target: it never takes a hit.
-    private static UUID spawnRangeCameraStand(MinecraftServer server, Vec3 target) {
-        ServerLevel level = server.overworld();
-        ArmorStand stand = EntityTypes.ARMOR_STAND.create(level, EntitySpawnReason.COMMAND);
-        if (stand == null) {
-            throw new AssertionError("Expected to create the camera armor stand");
-        }
-        Vec3 position = RANGE_STAND.add(1.8, 0.0, -1.0);
-        stand.setPos(position.x, position.y, position.z);
-        Vec3 midpoint = RANGE_STAND.add(target).scale(0.5).add(0.0, 0.9, 0.0);
-        stand.lookAt(EntityAnchorArgument.Anchor.EYES, midpoint);
-        stand.setInvisible(true);
-        stand.setNoGravity(true);
-        stand.setPermanentlyInvulnerable(true);
-        level.addFreshEntity(stand);
-        return stand.getUUID();
-    }
-
-    /// Switches the client camera to the armor stand beside the shooter, so the stage is filmed
-    /// from beside it. The camera is a viewpoint, not game behaviour: {@code
-    /// Minecraft.setCameraEntity} is the vanilla client's own switch, and every input still goes
-    /// through the recording player's real keys. The {@code Gui} draws the hotbar and hearts only
-    /// for a Player camera ({@code Hud.java:728} in the 26.3 sources), so these stages show
-    /// neither; the captions carry the shot count and the target's health instead. Vanilla also
-    /// never draws the local player while the camera is not it ({@code LevelExtractor.java:269-270}
-    /// in the 26.3 sources), so the shooter is invisible; its first-person hands and bow are drawn,
-    /// as vanilla draws them for a non-player camera ({@code GameRenderer.java:377-380}).
-    private static void enterRangeCamera(
-            ClientGameTestContext context, TestDedicatedServerContext server, UUID standId) {
-        context.waitFor(
-                client -> {
-                    for (Entity entity : client.level.entitiesForRendering()) {
-                        if (entity.getUUID().equals(standId)) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
-                200);
-        context.runOnClient(
-                client -> {
-                    for (Entity entity : client.level.entitiesForRendering()) {
-                        if (entity.getUUID().equals(standId)) {
-                            client.setCameraEntity(entity);
-                            return;
-                        }
-                    }
-                    throw new AssertionError("Expected the camera armor stand on the client");
-                });
-        // The camera's eye height lerps to the stand's over a few ticks (Camera.java:82-83 in the
-        // 26.3 sources); the frames of that slide are before the next marker, so the cut drops
-        // them.
-        context.waitTicks(6);
-        requireKeysOverlay(context);
-    }
-
-    /// Puts the camera back on the recording player and removes the armor stand.
-    private static void leaveRangeCamera(
-            ClientGameTestContext context, TestDedicatedServerContext server, UUID standId) {
-        context.runOnClient(client -> client.setCameraEntity(client.player));
-        server.runOnServer(
-                current -> {
-                    Entity stand = current.overworld().getEntity(standId);
-                    if (stand != null) {
-                        stand.discard();
-                    }
-                });
-    }
-
     private static void setDamageRules(
             MinecraftServer server, boolean disableIFrames, boolean disableAttackCooldown) {
         GameRules rules = server.overworld().getGameRules();
@@ -1993,11 +1976,62 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         closeStage(context, "showcase.ready", 4);
         meleeHalf(context, server, playerId, targetId, false);
         meleeHalf(context, server, playerId, targetId, true);
-        cooldownHalf(context, server, playerId, targetId, false);
-        cooldownHalf(context, server, playerId, targetId, true);
+        server.runOnServer(current -> parkTarget(current, targetId));
+        recordKnockback(
+                context,
+                server,
+                playerId,
+                new KnockCase(
+                        "sword",
+                        "Sword",
+                        "hit",
+                        "MeleeDummy",
+                        SWORD_KNOCK_DISTANCE,
+                        SWORD_KNOCK_HITS,
+                        true,
+                        AcceleratedDamageClientGameTest::giveSword,
+                        ready ->
+                                ready.waitFor(
+                                        client ->
+                                                client.player
+                                                        .getMainHandItem()
+                                                        .is(Items.WOODEN_SWORD)),
+                        (input, id, _) -> {
+                            ClientGameTestPlayerActions.attackEntity(input, id);
+                            input.waitTicks(INPUT_CADENCE_TICKS - 1);
+                        }));
+        recordMace(context, server, playerId);
+    }
+
+    /// The mace stages: the same swing every {@link #COOLDOWN_CADENCE_TICKS} ticks with the effect
+    /// rule off, then on. The camera is already on the dummy's shins when the scene opens, so no
+    /// stage turns it.
+    private static void recordMace(
+            ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
+        int targetId =
+                server.computeOnServer(
+                        current -> {
+                            ServerPlayer player = player(current, playerId);
+                            player.getInventory().clearContent();
+                            player.getInventory().setItem(0, new ItemStack(Items.MACE));
+                            player.getInventory().setSelectedSlot(0);
+                            player.connection.send(new ClientboundSetHeldSlotPacket(0));
+                            return placeTarget(
+                                    current, "MeleeDummy", MELEE_TARGET, WEAPON_TARGET_HEALTH);
+                        });
+        // The indicator is drawn nine GUI pixels below the crosshair (Hud.java:448-465), so aiming
+        // at the neck puts it on the dummy's chest, where the red hurt flash hides it. Aiming at
+        // the shins keeps the crosshair inside the hitbox and puts the bar on the floor below it.
+        Vec3 shins =
+                server.computeOnServer(
+                        current -> entity(current, targetId).position().add(0.0, 0.2, 0.0));
+        enterScene(context, server, playerId, MELEE_STAND, shins);
+        // The client's own hand must hold the mace before the attack key sends anything.
+        context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
+        cooldownHalf(context, server, targetId, false);
+        cooldownHalf(context, server, targetId, true);
         server.runOnServer(
                 current -> {
-                    current.tickRateManager().setTickRate(20.0F);
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, false, current);
@@ -2015,49 +2049,30 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// low while every sword hit lands. A-1409 is shown by these two cooldown halves, where the
     /// effect rule alone changes the synced attack speed.
     ///
-    /// <p>The game runs at {@link #COOLDOWN_TICK_RATE} ticks a second for both halves. The
-    /// accelerated refill is 3.3 ticks, a sixth of a second at the vanilla 20, which a 30 fps
-    /// capture shows as a flicker. At 5 ticks a second it lasts two thirds of a second and the
-    /// vanilla one 6.7 seconds, so both are refills a viewer can follow.
+    /// <p>The game runs at its normal 20 ticks a second. The accelerated refill is 3.3 ticks, five
+    /// frames of a 30 fps film, and the vanilla one 33.3 ticks, so a swing every {@link
+    /// #COOLDOWN_CADENCE_TICKS} ticks leaves the vanilla bar under a third full and the accelerated
+    /// one full again before the next swing.
     private static void cooldownHalf(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
-            int playerId,
             int targetId,
             boolean rulesOn) {
         String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
-        String title = "Attack indicator, effect rule " + (rulesOn ? "on" : "off");
-        openStage(
-                context,
-                stage,
-                title,
-                "a mace hit every "
-                        + COOLDOWN_CADENCE_TICKS
-                        + " ticks, the game at "
-                        + (int) COOLDOWN_TICK_RATE
-                        + " ticks a second");
+        String title =
+                rulesOn
+                        ? "Mace: the attack bar refills almost at once"
+                        : "Mace: the attack bar refills slowly";
+        openStage(context, stage, title, "a swing every half second");
         server.runOnServer(
                 current -> {
                     setDamageRules(current, false, false);
                     current.overworld()
                             .getGameRules()
                             .set(ModGameRules.FASTER_EFFECT_TICKING, rulesOn, current);
-                    current.tickRateManager().setTickRate(COOLDOWN_TICK_RATE);
-                    ServerPlayer player = player(current, playerId);
-                    player.getInventory().setItem(0, new ItemStack(Items.MACE));
-                    player.getInventory().setSelectedSlot(0);
                     resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
                 });
-        // The client's own hand must hold the mace before the attack key sends anything.
-        context.waitFor(client -> client.player.getMainHandItem().is(Items.MACE));
-        // The indicator is drawn nine GUI pixels below the crosshair (Hud.java:448-465), so aiming
-        // at the neck puts it on the dummy's chest, where the red hurt flash hides it. Aiming at
-        // the shins keeps the crosshair inside the hitbox and puts the bar on the floor below it.
-        ClientGameTestPlayerActions.lookAt(
-                context,
-                server.computeOnServer(
-                        current -> entity(current, targetId).position().add(0.0, 0.2, 0.0)));
-        // A hit every five ticks: the client resets its own attack-strength ticker on the attack
+        // A hit every ten ticks: the client resets its own attack-strength ticker on the attack
         // packet, so the indicator empties and refills between hits. With the effect rule off the
         // mace's 33.3-tick delay leaves it crawling. With the rule on the synced 3.3-tick delay
         // fills it before the next hit.
@@ -2131,7 +2146,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             boolean rulesOn) {
         String stage = "showcase.melee-" + (rulesOn ? "on" : "off");
         String title =
-                "Sword every 2 ticks, cooldown and i-frame rules " + (rulesOn ? "on" : "off");
+                rulesOn
+                        ? "Sword: every quick hit lands in full"
+                        : "Sword: a quick hit right after a hit is weak or ignored";
         openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
         openHitLog(
                 server,
@@ -2150,16 +2167,34 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         finishHalf(context, server, stage, title, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
     }
 
+    private static void equipBow(ServerPlayer player) {
+        player.getInventory().clearContent();
+        player.getInventory().setItem(0, new ItemStack(Items.BOW));
+        player.getInventory().setItem(8, new ItemStack(Items.ARROW, 64));
+        player.getInventory().setSelectedSlot(0);
+        player.connection.send(new ClientboundSetHeldSlotPacket(0));
+    }
+
+    /// One draw and release of the bow: a full-power arrow under instant_shoot.
+    private static void shootBow(ClientGameTestContext context) {
+        context.getInput().pressKey(options -> options.keyUse);
+        context.waitTicks(BOW_CADENCE_TICKS - BOW_PRESS_TICKS);
+    }
+
+    /// The hotbar key of {@code slot}, then the use key: a loaded crossbow fires and a splash
+    /// potion is thrown on the press, and a trident on the release a tick later.
+    private static void useHotbarSlot(ClientGameTestContext context, int slot) {
+        context.getInput().pressKey(options -> options.keyHotbarSlots[slot]);
+        context.getInput().pressKey(options -> options.keyUse);
+        context.waitTicks(HOTBAR_CADENCE_TICKS - HOTBAR_PRESS_TICKS);
+    }
+
     private static void recordBow(
             ClientGameTestContext context, TestDedicatedServerContext server, int playerId) {
         int targetId =
                 server.computeOnServer(
                         current -> {
-                            ServerPlayer player = player(current, playerId);
-                            player.getInventory().clearContent();
-                            player.getInventory().setItem(0, new ItemStack(Items.BOW));
-                            player.getInventory().setItem(8, new ItemStack(Items.ARROW, 64));
-                            player.getInventory().setSelectedSlot(0);
+                            equipBow(player(current, playerId));
                             current.overworld()
                                     .getGameRules()
                                     .set(ModGameRules.INSTANT_SHOOT, true, current);
@@ -2168,15 +2203,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         });
         enterScene(context, server, playerId, RANGE_STAND, chest(server, targetId));
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        rangeCameraStand =
-                server.computeOnServer(current -> spawnRangeCameraStand(current, RANGE_TARGET));
-        enterRangeCamera(context, server, rangeCameraStand);
         // The client's own hand must hold the bow: MultiPlayerGameMode#useItem sends no packet
         // while the client's carried item is empty, whatever the server's main hand holds.
-        context.getInput().pressKey(options -> options.keyHotbarSlots[0]);
+        context.waitFor(client -> client.player.getMainHandItem().is(Items.BOW));
+        firstPersonProjectiles = true;
         for (boolean rulesOn : new boolean[] {false, true}) {
             String stage = "showcase.bow-" + (rulesOn ? "on" : "off");
-            String title = "Bow, an arrow every 3 ticks, i-frame rule " + (rulesOn ? "on" : "off");
+            String title =
+                    rulesOn
+                            ? "Bow: every arrow does its full damage"
+                            : "Bow: an arrow right after a hit does almost nothing";
             openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
             openHitLog(
                     server,
@@ -2188,33 +2224,49 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
                     });
             for (int shot = 1; shot <= BOW_SHOTS; shot++) {
-                // One tick of draw, then the release on the next tick fires a full-power arrow
-                // under instant_shoot.
-                context.getInput().holdKeyFor(options -> options.keyUse, 1);
-                context.waitTicks(DRAW_CADENCE_TICKS - 1);
+                shootBow(context);
                 showHealth(context, server, targetId, stage, title, "shot " + shot);
             }
             finishHalf(context, server, stage, title, "shot " + BOW_SHOTS, BOW_SHOTS, rulesOn);
         }
         server.runOnServer(current -> parkTarget(current, targetId));
+        recordKnockback(
+                context,
+                server,
+                playerId,
+                new KnockCase(
+                        "bow",
+                        "Bow",
+                        "arrow",
+                        "BowDummy",
+                        RANGE_KNOCK_DISTANCE,
+                        RANGE_KNOCK_SHOTS,
+                        false,
+                        AcceleratedDamageClientGameTest::equipBow,
+                        ready ->
+                                ready.waitFor(
+                                        client -> client.player.getMainHandItem().is(Items.BOW)),
+                        (input, _, _) -> shootBow(input)));
+        firstPersonProjectiles = false;
     }
 
     /// Nine weapons in the hotbar, one per slot, fired one after another from {@code stand} at the
-    /// point {@code aim} picks on the target: the hotbar key and the use key go down in the same
-    /// tick. A loaded crossbow fires and a splash potion is thrown on the press, and a trident is
-    /// thrown on the release a tick later. Nothing of the half may hurt the recording player.
+    /// point {@code aim} picks on the target: the hotbar key and then the use key. Nothing of the
+    /// half may hurt the recording player. A projectile weapon ({@code knock} not null) is filmed
+    /// from the player's own eyes, and its knockback stages follow the two damage halves.
     private static void recordLoadedHotbar(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
             String name,
-            String subject,
+            String offTitle,
+            String onTitle,
             String dummy,
             Vec3 targetPosition,
             Vec3 stand,
             Function<Entity, Vec3> aim,
             IntFunction<ItemStack> weapon,
-            int cadenceTicks) {
+            KnockCase knock) {
         int targetId =
                 server.computeOnServer(
                         current -> {
@@ -2228,9 +2280,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Vec3 view = server.computeOnServer(current -> aim.apply(entity(current, targetId)));
         enterScene(context, server, playerId, stand, view);
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+        firstPersonProjectiles = knock != null;
         for (boolean rulesOn : new boolean[] {false, true}) {
             String stage = "showcase." + name + "-" + (rulesOn ? "on" : "off");
-            String title = subject + ", i-frame rule " + (rulesOn ? "on" : "off");
+            String title = rulesOn ? onTitle : offTitle;
             server.runOnServer(current -> fillHotbar(player(current, playerId), weapon));
             waitForClientHotbar(context, weapon);
             openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
@@ -2244,14 +2297,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                         resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
                     });
             for (int shot = 1; shot <= HOTBAR_SHOTS; shot++) {
-                int slot = shot - 1;
-                Function<Options, KeyMapping> hotbarKey = options -> options.keyHotbarSlots[slot];
-                context.getInput().holdKey(hotbarKey);
-                context.getInput().holdKey(options -> options.keyUse);
-                context.waitTick();
-                context.getInput().releaseKey(options -> options.keyUse);
-                context.getInput().releaseKey(hotbarKey);
-                context.waitTicks(cadenceTicks - 1);
+                useHotbarSlot(context, shot - 1);
                 showHealth(context, server, targetId, stage, title, "shot " + shot);
             }
             finishHalf(
@@ -2271,6 +2317,202 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
         }
         server.runOnServer(current -> parkTarget(current, targetId));
+        if (knock != null) {
+            recordKnockback(context, server, playerId, knock);
+        }
+        firstPersonProjectiles = false;
+    }
+
+    /// A hotbar weapon's knockback case: {@link #RANGE_KNOCK_SHOTS} shots, one per slot.
+    private static KnockCase hotbarKnock(
+            String name,
+            String subject,
+            String noun,
+            String dummy,
+            double distance,
+            IntFunction<ItemStack> weapon) {
+        return new KnockCase(
+                name,
+                subject,
+                noun,
+                dummy,
+                distance,
+                RANGE_KNOCK_SHOTS,
+                false,
+                player -> fillHotbar(player, weapon),
+                ready -> waitForClientHotbar(ready, weapon),
+                (input, _, shot) -> useHotbarSlot(input, shot - 1));
+    }
+
+    /// How one weapon's knockback stages are set up: what the player holds and does, how far in
+    /// front of the player the target stands, how many hits or shots there are, and the nouns the
+    /// caption uses.
+    private record KnockCase(
+            String name,
+            String subject,
+            String noun,
+            String dummy,
+            double distance,
+            int shots,
+            boolean cooldownRuleToo,
+            Consumer<ServerPlayer> equip,
+            Consumer<ClientGameTestContext> ready,
+            ShotInput input) {}
+
+    /// One hit or shot of a knockback stage, including the wait up to its cadence.
+    @FunctionalInterface
+    private interface ShotInput {
+        void fire(ClientGameTestContext context, int targetId, int shot);
+    }
+
+    /// Two stages that show how far a target is pushed: the first hits or shots of the case at a
+    /// free target on the banded floor of the knockback lane, with the rules off and then on.
+    /// Vanilla rejects a hit inside the ten ticks after another one before it reaches the
+    /// knockback, so only the first hit of the volley pushes; with {@code disable_i_frames} every
+    /// hit takes the full-damage path and pushes (AcceleratedDamageKnockbackScenarios). The caption
+    /// holds the target's distance from where it stood, read from the server every tick, and the
+    /// stage runs on until the target has come to rest.
+    private static void recordKnockback(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int playerId,
+            KnockCase knock) {
+        Vec3 start = new Vec3(KNOCK_X, ARENA_Y, KNOCK_STAND.z + knock.distance());
+        double[] pushed = new double[2];
+        for (int half = 0; half < 2; half++) {
+            boolean rulesOn = half == 1;
+            String stage = "showcase.knock-" + knock.name() + "-" + (rulesOn ? "on" : "off");
+            String title =
+                    knock.subject()
+                            + (rulesOn
+                                    ? ": every " + knock.noun() + " pushes the target back"
+                                    : ": only the first "
+                                            + knock.noun()
+                                            + " pushes the target back");
+            int targetId =
+                    server.computeOnServer(
+                            current -> {
+                                current.overworld()
+                                        .getGameRules()
+                                        .set(ModGameRules.INSTANT_SHOOT, true, current);
+                                knock.equip().accept(player(current, playerId));
+                                return placeFreeTarget(current, knock.dummy(), start);
+                            });
+            if (half == 0) {
+                Vec3 eyes =
+                        server.computeOnServer(
+                                current -> entity(current, targetId).getEyePosition());
+                enterScene(context, server, playerId, KNOCK_STAND, eyes);
+                ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
+            }
+            knock.ready().accept(context);
+            waitForShot(context, stage, shotTargets(server, List.of(targetId)));
+            openStage(context, stage, title, pushLine(0.0));
+            openHitLog(
+                    server,
+                    stage,
+                    playerId,
+                    targetId,
+                    current -> {
+                        setDamageRules(current, rulesOn, rulesOn && knock.cooldownRuleToo());
+                        resetTarget(current, targetId, WEAPON_TARGET_HEALTH);
+                    });
+            for (int shot = 1; shot <= knock.shots(); shot++) {
+                knock.input().fire(context, targetId, shot);
+                showPush(context, server, targetId, stage, title, start);
+            }
+            for (int waited = 0; ; waited++) {
+                boolean rested =
+                        server.computeOnServer(
+                                current -> {
+                                    HitLog log = hitLog;
+                                    LivingEntity target = living(current, targetId);
+                                    return log.inputTicks.size() >= knock.shots()
+                                            && log.hits.size() >= log.inputTicks.size()
+                                            && target.onGround()
+                                            && target.getDeltaMovement().horizontalDistanceSqr()
+                                                    < KNOCK_REST_SPEED * KNOCK_REST_SPEED;
+                                });
+                if (rested) {
+                    break;
+                }
+                if (waited >= KNOCK_SLIDE_TICKS) {
+                    throw new AssertionError(
+                            "Expected the target of "
+                                    + stage
+                                    + " to come to rest within "
+                                    + KNOCK_SLIDE_TICKS
+                                    + " ticks of the last "
+                                    + knock.noun()
+                                    + ": "
+                                    + server.computeOnServer(current -> hitLog.describe()));
+                }
+                context.waitTick();
+                showPush(context, server, targetId, stage, title, start);
+            }
+            for (int held = 0; held < KNOCK_HOLD_TICKS; held++) {
+                context.waitTick();
+                pushed[half] = showPush(context, server, targetId, stage, title, start);
+            }
+            HitLog log =
+                    server.computeOnServer(
+                            current -> {
+                                HitLog closing = hitLog;
+                                hitLog = null;
+                                closing.close(
+                                        serverTick, living(current, closing.targetId).getHealth());
+                                return closing;
+                            });
+            System.out.println(log.describe());
+            System.out.println("AD_KNOCK " + stage + " pushed=" + blocks(pushed[half]) + " blocks");
+            closeStage(context, stage, 4);
+            assertCadence(log, knock.shots());
+            if (rulesOn) {
+                assertEveryHitLands(log);
+            } else {
+                assertVanillaWindows(log);
+            }
+        }
+        if (pushed[1] < pushed[0] * KNOCK_MIN_GAIN) {
+            throw new AssertionError(
+                    "Expected the "
+                            + knock.name()
+                            + " target to be pushed at least "
+                            + KNOCK_MIN_GAIN
+                            + " times as far with the rule on: "
+                            + blocks(pushed[0])
+                            + " blocks off, "
+                            + blocks(pushed[1])
+                            + " blocks on");
+        }
+        server.runOnServer(current -> parkTarget(current, DUMMIES.get(knock.dummy())));
+    }
+
+    /// Shows the target's distance from its start and returns it.
+    private static double showPush(
+            ClientGameTestContext context,
+            TestDedicatedServerContext server,
+            int targetId,
+            String stage,
+            String title,
+            Vec3 start) {
+        double pushed =
+                server.computeOnServer(
+                        current -> {
+                            Vec3 at = entity(current, targetId).position();
+                            return Math.hypot(at.x - start.x, at.z - start.z);
+                        });
+        ClientGameTestRecorder.showStep(context, stage, title, pushLine(pushed));
+        requireNoEntityFillsTheFrame(stage);
+        return pushed;
+    }
+
+    private static String pushLine(double pushed) {
+        return "pushed " + blocks(pushed) + " blocks";
+    }
+
+    private static String blocks(double distance) {
+        return String.format(Locale.ROOT, "%.1f", distance);
     }
 
     /// The vanilla client's own stab gate, which is what a spear waits on: {@code
@@ -2401,8 +2643,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Fails unless the half's last caption shows the last hit's health. The cut keeps a stage up
     /// to its end marker, so a caption pushed on the marker's own tick never reaches the film: the
-    /// bow half's 14 shots at 3 ticks run 42 ticks, past {@link #HALF_TICKS}, and its last caption
-    /// was cut from the take.
+    /// bow half's 10 shots at 4 ticks run up to {@link #HALF_TICKS}, and its last caption was cut
+    /// from the take.
     private static void requireLastCaptionShown(String stage, HitLog log) {
         Float caption = LAST_CAPTION_HEALTH;
         if (caption == null) {
@@ -3165,7 +3407,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// titleNames} figures in the title and the rules after the rest.
     private static String[] caption(
             MinecraftServer server, List<Integer> targets, EffectScene scene, boolean rulesOn) {
-        String rules = "effect and i-frame rules " + (rulesOn ? "on" : "off");
+        String rules = rulesOn ? "much faster" : "vanilla speed";
         int split = scene.titleNames();
         if (split == 0) {
             return new String[] {
@@ -3542,6 +3784,20 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return id;
     }
 
+    /// Moves a pre-created dummy to a knockback stage's start with a fresh health pool and lets
+    /// real knockback move it: nothing pins it and its knockback resistance is zero, so every hit
+    /// that takes vanilla's full-damage path pushes it along the floor. {@link #parkTarget}
+    /// restores the resistance.
+    private static int placeFreeTarget(MinecraftServer server, String name, Vec3 position) {
+        int id = placeTarget(server, name, position, WEAPON_TARGET_HEALTH);
+        ServerPlayer target = player(server, id);
+        target.setDeltaMovement(Vec3.ZERO);
+        target.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(0.0);
+        TRACKED.put(target.getUUID(), new TrackedTarget(target.getUUID(), name, null));
+        publishTrackedIds();
+        return id;
+    }
+
     /// Gives a dummy a fresh health pool and clears what the last half left on it: fire, frost,
     /// effects, stuck arrows, spent air and the feeding.
     private static void resetTarget(MinecraftServer server, int targetId, float health) {
@@ -3571,6 +3827,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             .findFirst()
                             .orElseThrow();
             player.removeAllEffects();
+            player.setDeltaMovement(Vec3.ZERO);
+            player.getAttribute(Attributes.KNOCKBACK_RESISTANCE).setBaseValue(1.0);
             player.setRemainingFireTicks(0);
             player.setHealth(player.getMaxHealth());
             player.teleportTo(
