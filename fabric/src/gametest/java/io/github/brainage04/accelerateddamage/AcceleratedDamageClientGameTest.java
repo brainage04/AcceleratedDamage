@@ -136,6 +136,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// about 30%, so the bound is a quarter.
     private static final double MAX_ENTITY_SCREEN_COVERAGE = 0.25;
 
+    /// Blocks from the camera within which a projectile counts as just fired by the player.
+    private static final double OUTGOING_PROJECTILE_RANGE = 2.0;
+
     /// How far outside a particle quad the inverse bilinear lookup may land and still count the
     /// cell. The raster samples cell centres, so a small margin absorbs rounding at the edges.
     private static final double QUAD_UV_MARGIN = 0.01;
@@ -465,8 +468,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// The game tick the server is on, set at the start of every server tick.
     private static volatile int serverTick;
 
-    /// Whether the stage being filmed is a projectile stage seen from the player's own eyes: a
-    /// frame the trail of a crit arrow covers is then reported ({@code AD_LENS}), not failed.
+    /// Whether the stage being filmed is a projectile stage seen from the player's own eyes: the
+    /// projectile the player fires is then left out of the frame coverage.
     private static volatile boolean firstPersonProjectiles;
 
     /// The motion each dummy's connection was sent by a hit, to apply at the start of its next
@@ -732,8 +735,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server,
                                 playerId,
                                 "crossbow",
-                                "Crossbow: an arrow right after a hit does almost nothing",
-                                "Crossbow: every arrow does its full damage",
+                                "Crossbow",
+                                "Vanilla behaviour (follow-up arrows do almost nothing)",
+                                "Every arrow does its full damage",
                                 "CrossbowDummy",
                                 RANGE_TARGET,
                                 RANGE_STAND,
@@ -753,8 +757,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server,
                                 playerId,
                                 "firework",
-                                "Rocket: a rocket right after a hit does almost nothing",
-                                "Rocket: every rocket does its full damage",
+                                "Rocket",
+                                "Vanilla behaviour (follow-up rockets do almost nothing)",
+                                "Every rocket does its full damage",
                                 "FireworkDummy",
                                 FIREWORK_TARGET,
                                 RANGE_STAND,
@@ -768,8 +773,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server,
                                 playerId,
                                 "trident",
-                                "Trident: a throw right after a hit does almost nothing",
-                                "Trident: every throw does its full damage",
+                                "Trident",
+                                "Vanilla behaviour (follow-up throws do almost nothing)",
+                                "Every throw does its full damage",
                                 "TridentDummy",
                                 RANGE_TARGET,
                                 RANGE_STAND,
@@ -792,8 +798,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 server,
                                 playerId,
                                 "splash",
-                                "Potion: a splash right after a hit does almost nothing",
-                                "Potion: every splash does its full damage",
+                                "Potion",
+                                "Vanilla behaviour (follow-up splashes do almost nothing)",
+                                "Every splash does its full damage",
                                 "SplashDummy",
                                 SPLASH_TARGET,
                                 SPLASH_STAND,
@@ -980,6 +987,22 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         return faces;
     }
 
+    /// Whether a render state is the projectile the player has just fired. In a stage filmed from
+    /// the player's eyes ({@link #firstPersonProjectiles}) the arrow, trident or rocket leaves from
+    /// the camera and its model fills the lens until it has flown clear. Nothing else in these
+    /// stages shoots, so a projectile within {@link #OUTGOING_PROJECTILE_RANGE} of the camera is
+    /// the player's own. Every other entity and every particle still counts toward the frame.
+    private static boolean isOutgoingProjectile(EntityRenderState state, Vec3 eye) {
+        boolean projectile =
+                state instanceof ArrowRenderState
+                        || state instanceof ThrownTridentRenderState
+                        || state.entityType == EntityTypes.FIREWORK_ROCKET;
+        return firstPersonProjectiles
+                && projectile
+                && new Vec3(state.x, state.y, state.z).distanceToSqr(eye)
+                        <= OUTGOING_PROJECTILE_RANGE * OUTGOING_PROJECTILE_RANGE;
+    }
+
     /// Fails a stage whose frame an entity fills more than a quarter of.
     ///
     /// <p>{@link #recordFrameCoverage} measures the render states of every frame the client draws.
@@ -989,13 +1012,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         String violation = LAST_FRAME_VIOLATION;
         LAST_FRAME_VIOLATION = null;
         if (violation != null) {
-            if (firstPersonProjectiles) {
-                // Seen from the player's own eyes, a crit arrow's trail drifts back along the
-                // line of fire and can cross the lens. The film does not move the camera for it:
-                // the frames are reported instead.
-                System.out.println("AD_LENS " + stage + ": " + violation);
-                return;
-            }
             throw new AssertionError(
                     "Expected no entity to fill the frame in " + stage + ": " + violation);
         }
@@ -1176,7 +1192,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         int largest = 0;
         String largestItem = null;
         for (EntityRenderState state : context.levelState().entityRenderStates) {
-            if (state.isInvisible) {
+            if (state.isInvisible || isOutgoingProjectile(state, eye)) {
                 continue;
             }
             int cells = 0;
@@ -2072,11 +2088,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int targetId,
             boolean rulesOn) {
         String stage = "showcase.cooldown-" + (rulesOn ? "on" : "off");
-        String title =
-                rulesOn
-                        ? "Mace: the attack bar refills almost at once"
-                        : "Mace: the attack bar refills slowly";
-        openStage(context, stage, title, "a swing every half second");
+        Caption caption =
+                halfCaption(
+                        "Mace",
+                        rulesOn,
+                        "Vanilla behaviour (the attack bar refills slowly)",
+                        "The attack bar refills almost at once");
+        openStage(context, stage, caption.counter("a swing every half second"), caption.words());
         server.runOnServer(
                 current -> {
                     setDamageRules(current, false, false);
@@ -2158,11 +2176,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             int targetId,
             boolean rulesOn) {
         String stage = "showcase.melee-" + (rulesOn ? "on" : "off");
-        String title =
-                rulesOn
-                        ? "Sword: every quick hit lands in full"
-                        : "Sword: a quick hit right after a hit is weak or ignored";
-        openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+        Caption caption =
+                halfCaption(
+                        "Sword",
+                        rulesOn,
+                        "Vanilla behaviour (quick hits are weak or ignored)",
+                        "Every quick hit lands in full");
+        openStage(
+                context,
+                stage,
+                caption.counter("health " + health(WEAPON_TARGET_HEALTH)),
+                caption.words());
         openHitLog(
                 server,
                 stage,
@@ -2175,9 +2199,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         for (int hit = 1; hit <= MELEE_HITS; hit++) {
             ClientGameTestPlayerActions.attackEntity(context, targetId);
             context.waitTicks(INPUT_CADENCE_TICKS - 1);
-            showHealth(context, server, targetId, stage, title, "hit " + hit);
+            showHealth(context, server, targetId, stage, caption, "hit " + hit);
         }
-        finishHalf(context, server, stage, title, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
+        finishHalf(context, server, stage, caption, "hit " + MELEE_HITS, MELEE_HITS, rulesOn);
     }
 
     private static void equipBow(ServerPlayer player) {
@@ -2222,11 +2246,17 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         firstPersonProjectiles = true;
         for (boolean rulesOn : new boolean[] {false, true}) {
             String stage = "showcase.bow-" + (rulesOn ? "on" : "off");
-            String title =
-                    rulesOn
-                            ? "Bow: every arrow does its full damage"
-                            : "Bow: an arrow right after a hit does almost nothing";
-            openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+            Caption caption =
+                    halfCaption(
+                            "Bow",
+                            rulesOn,
+                            "Vanilla behaviour (follow-up arrows do almost nothing)",
+                            "Every arrow does its full damage");
+            openStage(
+                    context,
+                    stage,
+                    caption.counter("health " + health(WEAPON_TARGET_HEALTH)),
+                    caption.words());
             openHitLog(
                     server,
                     stage,
@@ -2238,9 +2268,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     });
             for (int shot = 1; shot <= BOW_SHOTS; shot++) {
                 shootBow(context);
-                showHealth(context, server, targetId, stage, title, "shot " + shot);
+                showHealth(context, server, targetId, stage, caption, "shot " + shot);
             }
-            finishHalf(context, server, stage, title, "shot " + BOW_SHOTS, BOW_SHOTS, rulesOn);
+            finishHalf(context, server, stage, caption, "shot " + BOW_SHOTS, BOW_SHOTS, rulesOn);
         }
         parkTargetAndWait(context, server, targetId);
         recordKnockback(
@@ -2265,15 +2295,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     /// Nine weapons in the hotbar, one per slot, fired one after another from {@code stand} at the
     /// point {@code aim} picks on the target: the hotbar key and then the use key. Nothing of the
-    /// half may hurt the recording player. A projectile weapon ({@code knock} not null) is filmed
-    /// from the player's own eyes, and its knockback stages follow the two damage halves.
+    /// half may hurt the recording player. A projectile weapon ({@code firstPerson}) is filmed from
+    /// the player's own eyes, and {@code knock}, when given, adds its knockback stages.
     private static void recordLoadedHotbar(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int playerId,
             String name,
-            String offTitle,
-            String onTitle,
+            String subject,
+            String offWords,
+            String onWords,
             String dummy,
             Vec3 targetPosition,
             Vec3 stand,
@@ -2297,10 +2328,14 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         firstPersonProjectiles = firstPerson;
         for (boolean rulesOn : new boolean[] {false, true}) {
             String stage = "showcase." + name + "-" + (rulesOn ? "on" : "off");
-            String title = rulesOn ? onTitle : offTitle;
+            Caption caption = halfCaption(subject, rulesOn, offWords, onWords);
             server.runOnServer(current -> fillHotbar(player(current, playerId), weapon));
             waitForClientHotbar(context, weapon);
-            openStage(context, stage, title, "health " + health(WEAPON_TARGET_HEALTH));
+            openStage(
+                    context,
+                    stage,
+                    caption.counter("health " + health(WEAPON_TARGET_HEALTH)),
+                    caption.words());
             openHitLog(
                     server,
                     stage,
@@ -2312,10 +2347,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     });
             for (int shot = 1; shot <= HOTBAR_SHOTS; shot++) {
                 useHotbarSlot(context, shot - 1);
-                showHealth(context, server, targetId, stage, title, "shot " + shot);
+                showHealth(context, server, targetId, stage, caption, "shot " + shot);
             }
             finishHalf(
-                    context, server, stage, title, "shot " + HOTBAR_SHOTS, HOTBAR_SHOTS, rulesOn);
+                    context, server, stage, caption, "shot " + HOTBAR_SHOTS, HOTBAR_SHOTS, rulesOn);
             float[] playerHealth =
                     server.computeOnServer(
                             current -> {
@@ -2337,7 +2372,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         firstPersonProjectiles = false;
     }
 
-    /// A hotbar weapon's knockback case: {@link #RANGE_KNOCK_SHOTS} shots, one per slot.
     private static KnockCase hotbarKnock(
             String name,
             String subject,
@@ -2358,9 +2392,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 (input, _, shot) -> useHotbarSlot(input, shot - 1));
     }
 
-    /// How one weapon's knockback stages are set up: what the player holds and does, how far in
-    /// front of the player the target stands, how many hits or shots there are, and the nouns the
-    /// caption uses.
     private record KnockCase(
             String name,
             String subject,
@@ -2373,7 +2404,6 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             Consumer<ClientGameTestContext> ready,
             ShotInput input) {}
 
-    /// One hit or shot of a knockback stage, including the wait up to its cadence.
     @FunctionalInterface
     private interface ShotInput {
         void fire(ClientGameTestContext context, int targetId, int shot);
@@ -2396,13 +2426,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         for (int half = 0; half < 2; half++) {
             boolean rulesOn = half == 1;
             String stage = "showcase.knock-" + knock.name() + "-" + (rulesOn ? "on" : "off");
-            String title =
-                    knock.subject()
-                            + (rulesOn
-                                    ? ": every " + knock.noun() + " pushes the target back"
-                                    : ": only the first "
-                                            + knock.noun()
-                                            + " pushes the target back");
+            Caption caption =
+                    halfCaption(
+                            knock.subject(),
+                            rulesOn,
+                            "Vanilla behaviour (only the first " + knock.noun() + " pushes back)",
+                            "Every " + knock.noun() + " pushes the target back");
             if (half > 0) {
                 parkTargetAndWait(context, server, DUMMIES.get(knock.dummy()));
             }
@@ -2427,7 +2456,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // The crosshair is picked once a frame, so it must see the target in place before an
             // attack key goes down.
             context.waitTicks(SCENE_SETTLE_TICKS);
-            openStage(context, stage, title, pushLine(0.0));
+            openStage(context, stage, caption.counter(pushLine(0.0)), caption.words());
             openHitLog(
                     server,
                     stage,
@@ -2439,7 +2468,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                     });
             for (int shot = 1; shot <= knock.shots(); shot++) {
                 knock.input().fire(context, targetId, shot);
-                showPush(context, server, targetId, stage, title, start);
+                showPush(context, server, targetId, stage, caption, start);
             }
             for (int waited = 0; ; waited++) {
                 boolean rested =
@@ -2468,11 +2497,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     + server.computeOnServer(current -> hitLog.describe()));
                 }
                 context.waitTick();
-                showPush(context, server, targetId, stage, title, start);
+                showPush(context, server, targetId, stage, caption, start);
             }
             for (int held = 0; held < KNOCK_HOLD_TICKS; held++) {
                 context.waitTick();
-                pushed[half] = showPush(context, server, targetId, stage, title, start);
+                pushed[half] = showPush(context, server, targetId, stage, caption, start);
             }
             HitLog log =
                     server.computeOnServer(
@@ -2493,11 +2522,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 assertVanillaWindows(log);
             }
         }
-        if (pushed[1] < pushed[0] * KNOCK_MIN_GAIN) {
+        if (pushed[0] <= 0.0 || pushed[1] < pushed[0] * KNOCK_MIN_GAIN) {
             throw new AssertionError(
                     "Expected the "
                             + knock.name()
-                            + " target to be pushed at least "
+                            + " target to be pushed with the rule off, and at least "
                             + KNOCK_MIN_GAIN
                             + " times as far with the rule on: "
                             + blocks(pushed[0])
@@ -2508,13 +2537,12 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         parkTargetAndWait(context, server, DUMMIES.get(knock.dummy()));
     }
 
-    /// Shows the target's distance from its start and returns it.
     private static double showPush(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int targetId,
             String stage,
-            String title,
+            Caption caption,
             Vec3 start) {
         double pushed =
                 server.computeOnServer(
@@ -2522,7 +2550,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             Vec3 at = entity(current, targetId).position();
                             return Math.hypot(at.x - start.x, at.z - start.z);
                         });
-        ClientGameTestRecorder.showStep(context, stage, title, pushLine(pushed));
+        ClientGameTestRecorder.showStep(
+                context, stage, caption.counter(pushLine(pushed)), caption.words());
         requireNoEntityFillsTheFrame(stage);
         return pushed;
     }
@@ -2656,16 +2685,34 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 });
     }
 
+    /// The two caption lines of a filmed half: the first names the scene, the rule state and the
+    /// live counter, the second says in plain words what the game does.
+    private record Caption(String scene, String words) {
+        String counter(String counter) {
+            return scene + ": " + counter;
+        }
+    }
+
+    private static Caption halfCaption(
+            String subject, boolean rulesOn, String offWords, String onWords) {
+        return new Caption(
+                subject + ", Accelerated Damage " + (rulesOn ? "on" : "off"),
+                rulesOn ? onWords : offWords);
+    }
+
     private static void showHealth(
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             int targetId,
             String stage,
-            String title,
+            Caption caption,
             String label) {
         float health = server.computeOnServer(current -> living(current, targetId).getHealth());
         ClientGameTestRecorder.showStep(
-                context, stage, title, label + ", health " + health(health));
+                context,
+                stage,
+                caption.counter(label + ", health " + health(health)),
+                caption.words());
         LAST_CAPTION_HEALTH = health;
         LAST_CAPTION_TICK = serverTick;
         requireNoEntityFillsTheFrame(stage);
@@ -2712,7 +2759,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             ClientGameTestContext context,
             TestDedicatedServerContext server,
             String stage,
-            String title,
+            Caption caption,
             String lastLabel,
             int expectedInputs,
             boolean rulesOn) {
@@ -2739,11 +2786,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             // The last projectiles land after the last input, so the caption is pushed again on
             // every tick of the wait: a number that changes on a tick is on screen on the next
             // frame, and the hold that follows shows the target's final health.
-            showHealth(context, server, targetId, stage, title, lastLabel);
+            showHealth(context, server, targetId, stage, caption, lastLabel);
         }
         // The loop breaks on the tick the last hit landed, before pushing that tick's caption, so
         // the health the last hit left is pushed here.
-        showHealth(context, server, targetId, stage, title, lastLabel);
+        showHealth(context, server, targetId, stage, caption, lastLabel);
         HitLog log =
                 server.computeOnServer(
                         current -> {
@@ -3437,11 +3484,11 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// titleNames} figures in the title and the rules after the rest.
     private static String[] caption(
             MinecraftServer server, List<Integer> targets, EffectScene scene, boolean rulesOn) {
-        String rules = rulesOn ? "much faster" : "vanilla speed";
+        String rules = rulesOn ? "much faster" : "Vanilla behaviour (slow)";
         int split = scene.titleNames();
         if (split == 0) {
             return new String[] {
-                scene.subject() + ", " + rules,
+                scene.subject() + ": " + rules,
                 healthLine(server, targets, scene, 0, targets.size())
             };
         }
