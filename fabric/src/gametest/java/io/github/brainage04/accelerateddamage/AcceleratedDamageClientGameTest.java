@@ -14,6 +14,9 @@ import io.github.brainage04.minecraftmodconventions.ClientGameTestServers;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestStages;
 import io.github.brainage04.minecraftmodconventions.ClientGameTestWaits;
 import io.github.brainage04.minecraftmodconventions.PerformanceOverlayPlacement;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
@@ -27,6 +30,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -57,6 +61,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.server.MinecraftServer;
@@ -266,13 +271,13 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     private static final int KNOCK_LANE_END_Z = 36;
 
     /// How far a case's target stands from the player. A sword reaches 3 blocks and the target
-    /// moves away from its first hit, so the sword's target stands close. A rocket's burst reaches
-    /// the shooter inside 5 blocks ({@code FireworkRocketEntity.dealExplosionDamage}), so its
-    /// target stands as far as the damage stage's does.
+    /// moves away from its first hit, so the sword's target stands close. There is no rocket
+    /// knockback stage: a rocket's burst pushes the target away from the burst point, not along the
+    /// line of fire, so after the first rocket the target has left the line and the next rockets
+    /// miss it.
     private static final double SWORD_KNOCK_DISTANCE = 1.7;
 
     private static final double RANGE_KNOCK_DISTANCE = 4.0;
-    private static final double ROCKET_KNOCK_DISTANCE = FIREWORK_TARGET.z - RANGE_STAND.z;
     private static final int SWORD_KNOCK_HITS = 2;
     private static final int RANGE_KNOCK_SHOTS = 3;
 
@@ -463,6 +468,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// Whether the stage being filmed is a projectile stage seen from the player's own eyes: a
     /// frame the trail of a crit arrow covers is then reported ({@code AD_LENS}), not failed.
     private static volatile boolean firstPersonProjectiles;
+
+    /// The motion each dummy's connection was sent by a hit, to apply at the start of its next
+    /// tick. See {@link #createDummy}.
+    private static final Map<Integer, Vec3> PENDING_MOTION = new ConcurrentHashMap<>();
 
     /// The log of the half being filmed, or {@code null} between halves. Written on the server
     /// thread only.
@@ -730,6 +739,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
                                 crossbow,
+                                true,
                                 hotbarKnock(
                                         "crossbow",
                                         "Crossbow",
@@ -750,13 +760,8 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
                                 rocket,
-                                hotbarKnock(
-                                        "firework",
-                                        "Rocket",
-                                        "rocket",
-                                        "FireworkDummy",
-                                        ROCKET_KNOCK_DISTANCE,
-                                        rocket));
+                                true,
+                                null);
                         IntFunction<ItemStack> trident = slot -> new ItemStack(Items.TRIDENT);
                         recordLoadedHotbar(
                                 context,
@@ -770,6 +775,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 RANGE_STAND,
                                 AcceleratedDamageClientGameTest::chest,
                                 trident,
+                                true,
                                 hotbarKnock(
                                         "trident",
                                         "Trident",
@@ -795,6 +801,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 slot ->
                                         PotionContents.createItemStack(
                                                 Items.SPLASH_POTION, Potions.HARMING),
+                                false,
                                 null);
                         recordEffectScene(context, server, playerId, hungerEffectsScene());
                         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
@@ -1731,6 +1738,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                 target.getFoodData().setFoodLevel(20);
                 target.getFoodData().setSaturation(20.0F);
             }
+            Vec3 motion = PENDING_MOTION.remove(target.getId());
+            if (motion != null && tracked.anchor() == null) {
+                target.setDeltaMovement(motion);
+            }
             float before = target.getHealth();
             target.doTick();
             boolean underWater = target.isEyeInFluid(FluidTags.WATER);
@@ -1978,7 +1989,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         closeStage(context, "showcase.ready", 4);
         meleeHalf(context, server, playerId, targetId, false);
         meleeHalf(context, server, playerId, targetId, true);
-        server.runOnServer(current -> parkTarget(current, targetId));
+        parkTargetAndWait(context, server, targetId);
         recordKnockback(
                 context,
                 server,
@@ -2231,7 +2242,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
             finishHalf(context, server, stage, title, "shot " + BOW_SHOTS, BOW_SHOTS, rulesOn);
         }
-        server.runOnServer(current -> parkTarget(current, targetId));
+        parkTargetAndWait(context, server, targetId);
         recordKnockback(
                 context,
                 server,
@@ -2268,6 +2279,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             Vec3 stand,
             Function<Entity, Vec3> aim,
             IntFunction<ItemStack> weapon,
+            boolean firstPerson,
             KnockCase knock) {
         int targetId =
                 server.computeOnServer(
@@ -2282,7 +2294,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         Vec3 view = server.computeOnServer(current -> aim.apply(entity(current, targetId)));
         enterScene(context, server, playerId, stand, view);
         ClientGameTestPlayerActions.requireVanillaInteractionRanges(context);
-        firstPersonProjectiles = knock != null;
+        firstPersonProjectiles = firstPerson;
         for (boolean rulesOn : new boolean[] {false, true}) {
             String stage = "showcase." + name + "-" + (rulesOn ? "on" : "off");
             String title = rulesOn ? onTitle : offTitle;
@@ -2318,7 +2330,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                 + playerHealth[0]);
             }
         }
-        server.runOnServer(current -> parkTarget(current, targetId));
+        parkTargetAndWait(context, server, targetId);
         if (knock != null) {
             recordKnockback(context, server, playerId, knock);
         }
@@ -2391,6 +2403,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                                     : ": only the first "
                                             + knock.noun()
                                             + " pushes the target back");
+            if (half > 0) {
+                parkTargetAndWait(context, server, DUMMIES.get(knock.dummy()));
+            }
             int targetId =
                     server.computeOnServer(
                             current -> {
@@ -2409,6 +2424,9 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
             }
             knock.ready().accept(context);
             waitForShot(context, stage, shotTargets(server, List.of(targetId)));
+            // The crosshair is picked once a frame, so it must see the target in place before an
+            // attack key goes down.
+            context.waitTicks(SCENE_SETTLE_TICKS);
             openStage(context, stage, title, pushLine(0.0));
             openHitLog(
                     server,
@@ -2487,7 +2505,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
                             + blocks(pushed[1])
                             + " blocks on");
         }
-        server.runOnServer(current -> parkTarget(current, DUMMIES.get(knock.dummy())));
+        parkTargetAndWait(context, server, DUMMIES.get(knock.dummy()));
     }
 
     /// Shows the target's distance from its start and returns it.
@@ -2511,6 +2529,16 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
 
     private static String pushLine(double pushed) {
         return "pushed " + blocks(pushed) + " blocks";
+    }
+
+    /// Sends a dummy to the parking spot and waits until the client has dropped it. A dummy moved
+    /// while the client still shows it keeps the body turn of that move
+    /// (LivingEntity.java:2791-2812 in the 26.3 sources) and would stand sideways in its next
+    /// scene; one the client has dropped is built again facing the way the server turns it.
+    private static void parkTargetAndWait(
+            ClientGameTestContext context, TestDedicatedServerContext server, int targetId) {
+        server.runOnServer(current -> parkTarget(current, targetId));
+        context.waitFor(client -> client.level.getEntity(targetId) == null, INPUT_WAIT_TICKS);
     }
 
     private static String blocks(double distance) {
@@ -3720,7 +3748,28 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         target.setYRot(yaw);
         target.setYHeadRot(yaw);
         Connection connection = new Connection(PacketFlow.SERVERBOUND);
-        new EmbeddedChannel(connection);
+        EmbeddedChannel channel = new EmbeddedChannel(connection);
+        // A player a player hits is knocked back on its own client: Player#causeExtraKnockback
+        // sends the target's motion to its connection and restores the server's copy
+        // (Player.java:1141-1145 in the 26.3 sources). The fake client has no client to apply it,
+        // so the motion is kept here and applied at the start of the target's next tick, as a
+        // real client applies it.
+        channel.pipeline()
+                .addFirst(
+                        new ChannelOutboundHandlerAdapter() {
+                            @Override
+                            public void write(
+                                    ChannelHandlerContext context,
+                                    Object message,
+                                    ChannelPromise promise)
+                                    throws Exception {
+                                if (message instanceof ClientboundSetEntityMotionPacket motion
+                                        && motion.id() == target.getId()) {
+                                    PENDING_MOTION.put(motion.id(), motion.movement());
+                                }
+                                super.write(context, message, promise);
+                            }
+                        });
         server.getPlayerList().placeNewPlayer(connection, target, cookie);
         // ServerPlayer#isInvulnerableTo rejects every damage source until the client acknowledges
         // the world load, which a real client does with this packet after its 60-tick load timer;
