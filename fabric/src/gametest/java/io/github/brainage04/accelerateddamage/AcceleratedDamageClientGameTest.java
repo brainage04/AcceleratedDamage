@@ -103,11 +103,11 @@ import org.joml.Vector4f;
 /// target's health printed in the caption after every hit, so a hit landing is visible.
 ///
 /// <p>Every scenario runs twice in the same scene with the same inputs: about two seconds with the
-/// scenario's rules off, then about two seconds with them on. Weapons hit every two game ticks with
-/// the real attack or use key, and the server writes down the game tick of every attack and shot
-/// and the target's health before and after every hit. A half fails when two inputs are more than
-/// five ticks apart, when a hit with the rules on deals no damage, or when, with the rules off, a
-/// hit inside vanilla's damage cooldown lands in full.
+/// scenario's rules off, then about two seconds with them on. Weapons hit every 3 or 4 game ticks
+/// with the real attack or use key, and the server writes down the game tick of every attack and
+/// shot and the target's health before and after every hit. A half fails when two inputs are more
+/// than five ticks apart, when a hit with the rules on deals no damage, or when, with the rules
+/// off, a hit inside vanilla's damage cooldown lands in full.
 ///
 /// <p>Player-shaped targets are {@link ServerPlayer}s, and a {@link ServerPlayer} only runs the
 /// {@code Player}/{@code LivingEntity}/{@code Entity} half of its tick from {@code doTick()}, which
@@ -269,7 +269,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// moves away from its first hit, so the sword's target stands close. A rocket's burst reaches
     /// the shooter inside 5 blocks ({@code FireworkRocketEntity.dealExplosionDamage}), so its
     /// target stands as far as the damage stage's does.
-    private static final double SWORD_KNOCK_DISTANCE = 2.0;
+    private static final double SWORD_KNOCK_DISTANCE = 1.7;
 
     private static final double RANGE_KNOCK_DISTANCE = 4.0;
     private static final double ROCKET_KNOCK_DISTANCE = FIREWORK_TARGET.z - RANGE_STAND.z;
@@ -357,8 +357,10 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// speed effect the client-duration check reads uses the same length.
     private static final int REGENERATION_TICKS = 1200;
 
-    /// Rule 5 of the recording rules: a hit at least every five ticks, ideally every two.
-    private static final int INPUT_CADENCE_TICKS = 2;
+    /// Ticks between two presses of the same key: the overlay needs three ticks to draw the key
+    /// released, fully dark, between two presses ({@code
+    /// ClientGameTestPlayerActions.RELEASED_GAP_TICKS}).
+    private static final int INPUT_CADENCE_TICKS = 3;
 
     /// A bow is drawn on one tick and released on the next. The server's synced "using an item"
     /// flag for that draw reaches the client a tick after the release and starts the use again on
@@ -379,7 +381,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
     /// only deals what exceeds the last one (LivingEntity.java:1219-1232 in the 26.3 sources).
     private static final int VANILLA_WINDOW_TICKS = 10;
 
-    private static final int MELEE_HITS = 16;
+    private static final int MELEE_HITS = 13;
     private static final int BOW_SHOTS = 10;
     private static final int HOTBAR_SHOTS = 9;
 
@@ -2136,7 +2138,7 @@ public final class AcceleratedDamageClientGameTest implements FabricClientGameTe
         closeStage(context, stage, 4);
     }
 
-    /// Sixteen sword hits, one every two ticks, with the real attack key on a target pinned in
+    /// Thirteen sword hits, one every three ticks, with the real attack key on a target pinned in
     /// place, so the player never walks or turns between hits.
     private static void meleeHalf(
             ClientGameTestContext context,
